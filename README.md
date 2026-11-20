@@ -77,17 +77,13 @@ public/                 interfaccia (HTML/CSS/JS senza framework)
 ## Pubblicazione online gratuita (versione statica)
 
 `npm run build` genera in `dist/` un sito statico con i pronostici già calcolati per una finestra di giorni
-(default 7 indietro e 10 avanti: `STATIC_DAYS_BACK`, `STATIC_DAYS_AHEAD`). `npm run build:sync` prima aggiorna i dati.
-Il workflow `.github/workflows/pubblica.yml` lo esegue su GitHub Actions due volte al giorno e pubblica `dist/`
-su Cloudflare Pages. Gli archivi in `data/` restano nella cache di Actions, così la quota API-Football non si spreca.
+(default 7 indietro e 10 avanti: `STATIC_DAYS_BACK`, `STATIC_DAYS_AHEAD`). Il sito è ospitato gratis su Cloudflare
+(file statici, configurazione in `wrangler.jsonc`): https://sporty-predict.e-daniello96.workers.dev
 
-Configurazione (una volta sola):
-1. Crea un repository **privato** su GitHub e caricaci il progetto (`.env`, `data/` e `dist/` sono esclusi da `.gitignore`).
-2. Su Cloudflare: *My Profile → API Tokens → Create Token →* modello "Edit Cloudflare Workers" oppure token
-   personalizzato con permesso **Account → Cloudflare Pages → Edit**. Copia anche l'**Account ID** (dashboard, colonna destra).
-3. Su GitHub: *Settings → Secrets and variables → Actions → New repository secret*:
-   `APIFOOTBALL_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
-4. *Actions → Pubblica pronostici → Run workflow*. Il sito sarà su `https://sporty-predict.pages.dev`
-   (nome diverso: variabile `CF_PAGES_PROJECT`).
+- `npm run pubblica`: aggiorna i dati (football-data + API-Football), genera il sito e lo carica. Prima volta: `npx wrangler login`.
+- `npm run pubblica:veloce`: pubblica i dati già presenti, senza chiamate API.
+- `scripts/pubblica.cmd`: stessa cosa per l'Utilità di pianificazione di Windows (registro in `pubblica.log`).
+- `.github/workflows/pubblica.yml`: alternativa nel cloud con GitHub Actions (segreti `APIFOOTBALL_KEY`,
+  `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`), due volte al giorno.
 
 Nella versione online il pulsante Aggiorna carica l'ultima pubblicazione; le partite fuori dalla finestra non sono disponibili.

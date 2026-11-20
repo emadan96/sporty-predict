@@ -14,9 +14,14 @@
     "build": "node server/build-static.js",
     "build:sync": "node server/build-static.js --sync",
     "pubblica": "node server/publish.js",
-    "pubblica:veloce": "node server/publish.js --no-sync"
+    "pubblica:veloce": "node server/publish.js --no-sync",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "wrangler": "^4.165.0"
   }
 }

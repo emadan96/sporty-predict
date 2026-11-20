@@ -1,0 +1,8 @@
+// Cloudflare: sito statico (cartella dist/ generata da npm run build), nessun codice server.
+{
+  "name": "sporty-predict",
+  "compatibility_date": "2026-11-18",
+  "assets": {
+    "directory": "dist"
+  }
+}

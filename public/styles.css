@@ -214,13 +214,13 @@ main { padding: calc(var(--spacing) * 6); min-width: 0; }
 }
 .day small { display: block; color: var(--muted-foreground); font-size: 11px; font-weight: 500; }
 .day:hover { background: var(--muted); }
-.day.active { background: var(--foreground); color: var(--background); }
-.day.active small { color: inherit; opacity: .7; }
+.day.active { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+.day.active small { color: inherit; opacity: .75; }
 .day.none { opacity: .4; }
 /* today, visible also while another day is selected */
 .day.today { background: color-mix(in srgb, var(--primary) 24%, transparent); border-color: var(--primary); }
 .day.today small { color: var(--foreground); font-weight: 600; }
-.day.today.active { background: var(--foreground); color: var(--background); box-shadow: 0 0 0 2px var(--primary); }
+.day.today.active { background: var(--primary); color: var(--primary-foreground); }
 .day.today.active small { color: inherit; }
 .day.today.none { opacity: .7; }
 .datebar input[type=date] {
@@ -260,6 +260,19 @@ main { padding: calc(var(--spacing) * 6); min-width: 0; }
 .league-head .lname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .league-head .lcount { color: var(--muted-foreground); font-weight: 500; font-size: 12px; background: var(--muted); border-radius: 999px; padding: 0 7px; }
 .league-block.collapsed .league-head { opacity: .6; }
+.league-head.static { cursor: default; }
+/* major competitions: lime star (darker lime in light theme for contrast) */
+.star { flex: none; color: #65a30d; }
+.dark .star { color: var(--primary); }
+.league-head.major .lname { font-weight: 700; }
+.teams .tl { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: var(--muted-foreground); margin-bottom: 2px; }
+.teams .tl span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.teams .tl .flag { width: 14px; height: 10px; }
+.row.major { box-shadow: inset 3px 0 0 var(--primary); }
+.row.major .tl { color: var(--foreground); font-weight: 600; }
+.top-chip { display: inline-flex; align-items: center; gap: 5px; }
+.top-chip.active .star { color: var(--primary-foreground); }
+.chip:disabled { opacity: .45; cursor: default; }
 .hcols, .rcols { display: grid; grid-template-columns: var(--rc); gap: 4px; align-items: center; }
 .hcols { margin-left: auto; color: var(--muted-foreground); font-size: 11px; font-weight: 500; text-align: center; }
 
@@ -387,8 +400,10 @@ table.t th { text-align: left; color: var(--muted-foreground); font-weight: 500;
 table.t td { padding: 8px; border-bottom: 1px solid var(--border); }
 table.t tr:last-child td { border-bottom: 0; }
 table.t td.r, table.t th.r { text-align: right; }
-table.t tr.me td { background: var(--accent); }
-.dark table.t tr.me td { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+table.t tr.me td { background: color-mix(in srgb, var(--primary) 26%, transparent); }
+table.t tr.me td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
+.dark table.t tr.me td { background: color-mix(in srgb, var(--primary) 16%, transparent); }
+.me-tag { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: 10px; font-weight: 600; line-height: 16px; vertical-align: 1px; }
 table.t tr.click { cursor: pointer; }
 table.t tr.click:hover td { background: var(--muted); }
 table.t tr.agg td { color: var(--muted-foreground); }
@@ -538,9 +553,8 @@ html, .sidebar, .detail, .search-results, .card table.t, .table-scroll {
 @media (hover: none) {
   .row:hover, .side-league:hover, .day:hover, .icon-btn:hover { background: inherit; }
   .side-league.active { background: var(--sidebar-primary); }
-  .day.active { background: var(--foreground); }
   .day.today { background: color-mix(in srgb, var(--primary) 24%, transparent); }
-  .day.today.active { background: var(--foreground); }
+  .day.active, .day.today.active { background: var(--primary); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

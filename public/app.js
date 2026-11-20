@@ -43,7 +43,7 @@ const store = {
 };
 
 const state = {
-  leagues: [], dates: null, status: null, date: null, league: null, filter: 'all', time: 'all', data: null, detail: null, tab: 'pred',
+  leagues: [], dates: null, status: null, date: null, league: null, filter: 'all', time: 'all', topFirst: store.get('topFirst', true), data: null, detail: null, tab: 'pred',
   tf: store.get('tf', 'FT'), trendTf: 'FT', collapsed: new Set(store.get('collapsed', [])),
 };
 const leagueBy = (code) => state.leagues.find((l) => l.code === code) || state.data?.leagues.find((l) => l.code === code) || { code, name: code, country: '' };
@@ -178,6 +178,12 @@ function passTime(m, slot = state.time) {
 function passFilter(m) {
   return passTime(m) && passStatus(m);
 }
+
+// Major competitions: European club cups, top-5 leagues, main national-team tournaments (display order).
+const MAJOR = ['AF2', 'AF3', 'AF848', 'AF531', 'I1', 'E0', 'SP1', 'D1', 'F1', 'AF1', 'AF4', 'AF5', 'AF9', 'AF32', 'AF34', 'AF29', 'AF30', 'AF31'];
+const majorRank = (code) => { const i = MAJOR.indexOf(code); return i < 0 ? Infinity : i; };
+const isMajor = (code) => MAJOR.includes(code);
+const STAR = '<svg class="star" viewBox="0 0 24 24" width="13" height="13" aria-label="Campionato principale"><path fill="currentColor" d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>';
 function passStatus(m) {
   switch (state.filter) {
     case 'upcoming': return m.status === 'NS';
@@ -205,7 +211,23 @@ function renderList() {
   const isToday = state.date === todayRome();
   if (state.time === 'next' && !isToday) state.time = 'all';
   let total = 0, hits = 0, played = 0;
-  const blocks = leagues.map((l) => {
+  const byTime = state.time !== 'all'; // time filter: one list in kick-off order
+  const ordered = state.topFirst ? [...leagues].sort((a, b) => majorRank(a.code) - majorRank(b.code)) : leagues; // stable: the rest keeps its order
+  const hcols = `<div class="hcols"><span class="oh">1 · X · 2</span><span>AH</span><span>Tot</span>${cols.map(([n]) => `<span>${n}</span>`).join('')}<span>Esatto</span><span class="ih">Indice</span></div>`;
+  let blocks;
+  if (byTime) {
+    const rows = [];
+    for (const l of leagues) for (const m of l.matches) if (passFilter(m)) rows.push({ m, l });
+    rows.sort((a, b) => (a.m.time || '').localeCompare(b.m.time || '') || majorRank(a.l.code) - majorRank(b.l.code) || a.m.home.localeCompare(b.m.home));
+    total = rows.length;
+    for (const { m } of rows) if (m.status === 'FT' && m.pred) { played++; if (outcomeKey(m.ft) === topKey(m.pred.x12)) hits++; }
+    const label = TIME_SLOTS.find(([k]) => k === state.time)?.[1] || '';
+    blocks = rows.length ? `
+      <section class="league-block chrono">
+        <div class="league-head static"><span class="lname">Per orario · ${esc(label)}</span><span class="lcount">${rows.length}</span>${hcols}</div>
+        ${rows.map(({ m, l }) => rowHtml(m, cols, l)).join('')}
+      </section>` : '';
+  } else blocks = ordered.map((l) => {
     const rows = l.matches.filter(passFilter);
     if (!rows.length) return '';
     total += rows.length;
@@ -213,9 +235,9 @@ function renderList() {
     const collapsed = state.collapsed.has(l.code);
     return `
       <section class="league-block ${collapsed ? 'collapsed' : ''}">
-        <div class="league-head" data-collapse="${esc(l.code)}">${leagueIcon(l)}<span class="country">${esc(l.country)}:</span> <span class="lname">${esc(l.name)}</span>
+        <div class="league-head ${isMajor(l.code) ? 'major' : ''}" data-collapse="${esc(l.code)}">${leagueIcon(l)}<span class="country">${esc(l.country)}:</span> <span class="lname">${esc(l.name)}</span>${isMajor(l.code) ? STAR : ''}
           <span class="lcount">${rows.length}</span>
-          <div class="hcols"><span class="oh">1 · X · 2</span><span>AH</span><span>Tot</span>${cols.map(([n]) => `<span>${n}</span>`).join('')}<span>Esatto</span><span class="ih">Indice</span></div>
+          ${hcols}
         </div>
         ${collapsed ? '' : rows.map((m) => rowHtml(m, cols)).join('')}
       </section>`;
@@ -247,6 +269,7 @@ function renderList() {
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         <select data-time aria-label="Orario">${TIME_SLOTS.filter(([k]) => k !== 'next' || isToday).map(([k, v]) => `<option value="${k}" ${state.time === k ? 'selected' : ''}>${v}${k === 'all' ? '' : ` (${slotCount[k]})`}</option>`).join('')}</select>
       </label>
+      <button class="chip top-chip ${state.topFirst && !byTime ? 'active' : ''}" data-top ${byTime ? 'disabled title="Con il filtro orario le partite sono in ordine di inizio"' : 'title="Coppe europee, top 5 campionati e grandi tornei per nazionali sempre in alto"'}>${STAR}Top in alto</button>
       ${FILTERS.map(([k, v]) => `<button class="chip ${state.filter === k ? 'active' : ''}" data-filter="${k}">${v}</button>`).join('')}
       ${played ? `<span class="chip stat" title="Esito 1X2 più probabile indovinato sulle partite finite mostrate">1X2 centrati <b>${hits}/${played}</b> (${pct(hits / played)})</span>` : ''}
     </div>
@@ -261,6 +284,7 @@ function renderList() {
     if (prev.date === state.date) dbar.scrollLeft = prev.d;
     else { const a = dbar.querySelector('.day.active'); if (a) dbar.scrollLeft = a.offsetLeft - (dbar.clientWidth - a.offsetWidth) / 2 - dbar.offsetLeft; }
   }
+  main.querySelector('[data-top]')?.addEventListener('click', () => { state.topFirst = !state.topFirst; store.set('topFirst', state.topFirst); renderList(); });
   main.querySelector('[data-time]')?.addEventListener('change', (e) => { state.time = e.target.value; renderList(); });
   main.querySelectorAll('[data-date]').forEach((el) => el.addEventListener('click', () => { location.hash = listHash(el.dataset.date, state.league); }));
   $('#main input[type=date]').addEventListener('change', (e) => { if (e.target.value) location.hash = listHash(e.target.value, state.league); });
@@ -297,7 +321,7 @@ function oddsCells(move) {
   return x12 + lineCell(c?.ah, o?.ah, sgn) + lineCell(c?.ou, o?.ou, (l) => fx(l, l % 0.5 ? 2 : 1));
 }
 
-function rowHtml(m, cols) {
+function rowHtml(m, cols, league = null) {
   const p = m.pred;
   const fin = m.status === 'FT';
   const winH = fin && m.ft[0] > m.ft[1], winA = fin && m.ft[1] > m.ft[0];
@@ -326,9 +350,10 @@ function rowHtml(m, cols) {
     : m.statusText ? `<div class="time off">${esc(m.statusText)}</div>`
       : m.status === 'LIVE' ? '<div class="time live">Live</div>' : `<div class="time">${esc(m.time)}</div>`;
   return `
-    <div class="row" data-id="${esc(m.id)}">
+    <div class="row ${league && isMajor(league.code) ? 'major' : ''}" data-id="${esc(m.id)}">
       ${timeCell}
       <div class="teams">
+        ${league ? `<div class="tl">${leagueIcon(league)}<span>${esc(league.country)} · ${esc(league.name)}</span>${isMajor(league.code) ? STAR : ''}</div>` : ''}
         <div class="t ${winH ? 'win' : ''}">${teamLogo(m.homeLogo)}<span>${esc(m.home)}</span>${p?.hasValue && !fin ? '<span class="badge value">VALUE</span>' : ''}</div>
         <div class="s num">${fin ? m.ft[0] : ''}${fin && m.ht ? `<span class="htsc">(${m.ht[0]})</span>` : ''}</div>
         <div class="t ${winA ? 'win' : ''}">${teamLogo(m.awayLogo)}<span>${esc(m.away)}</span></div>
@@ -696,10 +721,10 @@ const TAB_RENDER = {
     if (!standings.length) return '<div class="empty">Classifica non disponibile.</div>';
     return `<div class="card"><table class="t">
       <tr><th>#</th><th>Squadra</th><th class="r">G</th><th class="r">V</th><th class="r">N</th><th class="r">P</th><th class="r">GF:GS</th><th class="r">DR</th><th class="r">Pt</th><th class="r">Forma</th></tr>
-      ${standings.map((r, i) => `<tr class="${r.team === m.home || r.team === m.away ? 'me' : ''}"><td class="num">${i + 1}</td><td>${esc(r.team)}</td>
+      ${standings.map((r, i) => { const side = r.team === (m.homeKey || m.home) ? 'Casa' : r.team === (m.awayKey || m.away) ? 'Trasf.' : ''; return `<tr class="${side ? 'me' : ''}"><td class="num">${i + 1}</td><td>${side ? `<b>${esc(r.team)}</b> <span class="me-tag">${side}</span>` : esc(r.team)}</td>
         <td class="r num">${r.p}</td><td class="r num">${r.w}</td><td class="r num">${r.d}</td><td class="r num">${r.l}</td><td class="r num">${r.gf}:${r.ga}</td>
         <td class="r num">${r.gd > 0 ? '+' : ''}${r.gd}</td><td class="r num"><b>${r.pts}</b></td>
-        <td class="r"><span class="form">${r.form.map((f) => `<i class="${f}">${f}</i>`).join('')}</span></td></tr>`).join('')}
+        <td class="r"><span class="form">${r.form.map((f) => `<i class="${f}">${f}</i>`).join('')}</span></td></tr>`; }).join('')}
     </table></div>`;
   },
 };

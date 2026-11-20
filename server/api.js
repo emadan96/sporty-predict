@@ -100,7 +100,7 @@ export function createApi(store, predictor) {
       }));
       const meta = leagueMeta(m.league);
       return {
-        match: { ...matchView(m), referee: m.referee, stats: m.stats, season: m.season, venue: m.venue || null },
+        match: { ...matchView(m), homeKey: m.home, awayKey: m.away, referee: m.referee, stats: m.stats, season: m.season, venue: m.venue || null },
         league: meta,
         odds: oddsView(m),
         move: movement(m),

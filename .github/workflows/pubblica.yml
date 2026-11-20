@@ -1,0 +1,57 @@
+# Aggiorna i pronostici e pubblica il sito statico su Cloudflare Pages (gratis).
+# Segreti richiesti (Settings → Secrets and variables → Actions):
+#   APIFOOTBALL_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+name: Pubblica pronostici
+
+on:
+  schedule:
+    - cron: '0 5 * * *'    # ogni giorno alle 06:00 (ora italiana, 07:00 con l'ora legale)
+    - cron: '0 15 * * *'   # e alle 16:00, per le quote più recenti
+  workflow_dispatch:       # pulsante "Run workflow" per aggiornare a mano
+  push:
+    branches: [main]
+
+concurrency:
+  group: pubblica
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TZ: Europe/Rome
+      APIFOOTBALL_KEY: ${{ secrets.APIFOOTBALL_KEY }}
+      PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sporty-predict' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Archivi CSV e cache API-Football tra un'esecuzione e l'altra: evita di consumare la quota giornaliera.
+      - name: Ripristina archivi
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: data-${{ github.run_id }}
+          restore-keys: data-
+
+      - name: Aggiorna dati e genera il sito
+        run: node server/build-static.js --sync
+
+      - name: Salva archivi
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: data-${{ github.run_id }}
+
+      - name: Pubblica su Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@4 pages project create "$PROJECT" --production-branch=main 2>/dev/null || true
+          npx --yes wrangler@4 pages deploy dist --project-name="$PROJECT" --branch=main --commit-dirty=true

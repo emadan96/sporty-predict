@@ -1,0 +1,20 @@
+{
+  "name": "sporty-predict",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Livescore-style football app with odds-driven predictions (FT, HT, multigol, exact score).",
+  "scripts": {
+    "ingest": "node server/ingest.js",
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "backtest": "node server/backtest.js",
+    "test": "node --test test/apifootball.test.js",
+    "sync": "node server/sync-cli.js",
+    "build": "node server/build-static.js",
+    "build:sync": "node server/build-static.js --sync"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

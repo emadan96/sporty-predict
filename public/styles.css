@@ -217,6 +217,12 @@ main { padding: calc(var(--spacing) * 6); min-width: 0; }
 .day.active { background: var(--foreground); color: var(--background); }
 .day.active small { color: inherit; opacity: .7; }
 .day.none { opacity: .4; }
+/* today, visible also while another day is selected */
+.day.today { background: color-mix(in srgb, var(--primary) 24%, transparent); border-color: var(--primary); }
+.day.today small { color: var(--foreground); font-weight: 600; }
+.day.today.active { background: var(--foreground); color: var(--background); box-shadow: 0 0 0 2px var(--primary); }
+.day.today.active small { color: inherit; }
+.day.today.none { opacity: .7; }
 .datebar input[type=date] {
   background: var(--card); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--radius-sm); height: 36px; padding: 0 8px;
 }
@@ -227,12 +233,25 @@ main { padding: calc(var(--spacing) * 6); min-width: 0; }
   padding: 6px 12px; border-radius: 999px; background: transparent; border: 1px solid var(--border); font-size: 13px; color: var(--muted-foreground); white-space: nowrap;
 }
 .chip:hover { color: var(--foreground); }
-.chip.active { background: var(--secondary); border-color: var(--secondary); color: var(--secondary-foreground); }
+.chip { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.chip.active { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); font-weight: 600; }
+.chip.active:hover { color: var(--primary-foreground); }
+/* kick-off time menu styled as a pill */
+.time-sel { display: inline-flex; align-items: center; gap: 6px; position: relative; padding-right: 26px; flex: none; }
+.time-sel select {
+  appearance: none; -webkit-appearance: none; background: transparent; border: 0; color: inherit; font: inherit; padding: 0; cursor: pointer; outline: none;
+}
+.time-sel select option { color: var(--foreground); background: var(--card); }
+.time-sel::after {
+  content: ''; position: absolute; right: 11px; top: 50%; width: 6px; height: 6px; margin-top: -5px;
+  border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: rotate(45deg); pointer-events: none;
+}
+.time-sel:focus-within { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; }
 .chip.stat { cursor: default; margin-left: auto; }
 .chip.stat b { color: var(--foreground); }
 .seg { display: inline-flex; flex: none; background: var(--muted); border-radius: 999px; padding: 3px; }
-.seg button { background: transparent; border: 0; padding: 5px 14px; border-radius: 999px; font-size: 13px; color: var(--muted-foreground); font-weight: 500; white-space: nowrap; }
-.seg button.active { background: var(--card); color: var(--foreground); box-shadow: 0 1px 3px rgb(0 0 0 / .1); }
+.seg button { -webkit-tap-highlight-color: transparent; background: transparent; border: 0; padding: 5px 14px; border-radius: 999px; font-size: 13px; color: var(--muted-foreground); font-weight: 500; white-space: nowrap; }
+.seg button.active { background: var(--primary); color: var(--primary-foreground); font-weight: 600; box-shadow: 0 1px 3px rgb(0 0 0 / .12); }
 
 /* ============================================================ match list */
 .league-block { background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow); }
@@ -520,6 +539,8 @@ html, .sidebar, .detail, .search-results, .card table.t, .table-scroll {
   .row:hover, .side-league:hover, .day:hover, .icon-btn:hover { background: inherit; }
   .side-league.active { background: var(--sidebar-primary); }
   .day.active { background: var(--foreground); }
+  .day.today { background: color-mix(in srgb, var(--primary) 24%, transparent); }
+  .day.today.active { background: var(--foreground); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

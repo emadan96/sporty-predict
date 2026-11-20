@@ -43,7 +43,7 @@ const store = {
 };
 
 const state = {
-  leagues: [], dates: null, status: null, date: null, league: null, filter: 'all', data: null, detail: null, tab: 'pred',
+  leagues: [], dates: null, status: null, date: null, league: null, filter: 'all', time: 'all', data: null, detail: null, tab: 'pred',
   tf: store.get('tf', 'FT'), trendTf: 'FT', collapsed: new Set(store.get('collapsed', [])),
 };
 const leagueBy = (code) => state.leagues.find((l) => l.code === code) || state.data?.leagues.find((l) => l.code === code) || { code, name: code, country: '' };
@@ -150,7 +150,35 @@ const FILTERS = [
   ['all', 'Tutte'], ['upcoming', 'In programma'], ['finished', 'Finite'], ['odds', 'Con quote'], ['value', 'Value bet'], ['alta', 'Alta fiducia'],
 ];
 
+// Kick-off time slots (Rome time). 'next' = not started yet, within the next 3 hours (today only).
+const TIME_SLOTS = [
+  ['all', 'Tutti gli orari'], ['next', 'Prossime 3 ore'], ['am', 'Fino alle 12:00'], ['12', '12:00 – 15:00'],
+  ['15', '15:00 – 18:00'], ['18', '18:00 – 21:00'], ['21', 'Dalle 21:00'],
+];
+const nowRomeMin = () => {
+  const [h, m] = new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date()).split(':').map(Number);
+  return h * 60 + m;
+};
+function passTime(m, slot = state.time) {
+  if (slot === 'all') return true;
+  const [h, mm] = String(m.time || '').split(':').map(Number);
+  if (!Number.isFinite(h)) return false;
+  const t = h * 60 + (mm || 0);
+  switch (slot) {
+    case 'next': { if (state.date !== todayRome() || m.status !== 'NS') return false; const n = nowRomeMin(); return t >= n && t <= n + 180; }
+    case 'am': return t < 720;
+    case '12': return t >= 720 && t < 900;
+    case '15': return t >= 900 && t < 1080;
+    case '18': return t >= 1080 && t < 1260;
+    case '21': return t >= 1260;
+    default: return true;
+  }
+}
+
 function passFilter(m) {
+  return passTime(m) && passStatus(m);
+}
+function passStatus(m) {
   switch (state.filter) {
     case 'upcoming': return m.status === 'NS';
     case 'finished': return m.status === 'FT';
@@ -171,6 +199,11 @@ function renderList() {
   const days = Array.from({ length: 11 }, (_, i) => addDays(state.date, i - 5));
   const leagues = (state.data.leagues || []).filter((l) => !state.league || l.code === state.league);
   const cols = COLS[state.tf];
+  // Matches per time slot, with the other filters applied (shown in the menu).
+  const slotCount = Object.fromEntries(TIME_SLOTS.map(([k]) => [k, 0]));
+  for (const l of leagues) for (const m of l.matches) if (passStatus(m)) for (const [k] of TIME_SLOTS) if (passTime(m, k)) slotCount[k]++;
+  const isToday = state.date === todayRome();
+  if (state.time === 'next' && !isToday) state.time = 'all';
   let total = 0, hits = 0, played = 0;
   const blocks = leagues.map((l) => {
     const rows = l.matches.filter(passFilter);
@@ -192,12 +225,17 @@ function renderList() {
   const banner = st && !st.enabled && !STATIC ? `<div class="banner">Stai vedendo solo i campionati di football-data.co.uk. Per avere <b>tutte le competizioni</b> (coppe europee, nazionali, campionati minori) inserisci la chiave API-Football nel file <code>.env</code> e riavvia.</div>`
     : '';
 
+  // Re-rendering must not reset the horizontal scroll of the date strip and the filter pills (mobile).
+  const prev = { f: $('#main .filters')?.scrollLeft || 0, d: $('#main .days')?.scrollLeft || 0, date: renderList.lastDate };
+  renderList.lastDate = state.date;
+  const today = todayRome();
+
   $('#main').innerHTML = `
     ${banner}
     <div class="datebar">
       <button class="nav" data-date="${addDays(state.date, -1)}" aria-label="Giorno precedente">‹</button>
       <div class="days">${days.map((d) => `
-        <div class="day ${d === state.date ? 'active' : ''} ${counts[d] ? '' : 'none'}" data-date="${d}">
+        <div class="day ${d === state.date ? 'active' : ''} ${d === today ? 'today' : ''} ${counts[d] ? '' : 'none'}" data-date="${d}"${d === today ? ' aria-current="date"' : ''}>
           <small>${dayLabel(d)}</small>${fmtDate(d)}</div>`).join('')}
       </div>
       <button class="nav" data-date="${addDays(state.date, 1)}" aria-label="Giorno successivo">›</button>
@@ -205,14 +243,25 @@ function renderList() {
     </div>
     <div class="filters">
       <div class="seg">${['FT', 'PT'].map((t) => `<button class="${state.tf === t ? 'active' : ''}" data-tf="${t}">${t === 'FT' ? 'Finale' : '1° tempo'}</button>`).join('')}</div>
+      <label class="chip time-sel ${state.time !== 'all' ? 'active' : ''}" title="Filtra per orario d'inizio">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <select data-time aria-label="Orario">${TIME_SLOTS.filter(([k]) => k !== 'next' || isToday).map(([k, v]) => `<option value="${k}" ${state.time === k ? 'selected' : ''}>${v}${k === 'all' ? '' : ` (${slotCount[k]})`}</option>`).join('')}</select>
+      </label>
       ${FILTERS.map(([k, v]) => `<button class="chip ${state.filter === k ? 'active' : ''}" data-filter="${k}">${v}</button>`).join('')}
       ${played ? `<span class="chip stat" title="Esito 1X2 più probabile indovinato sulle partite finite mostrate">1X2 centrati <b>${hits}/${played}</b> (${pct(hits / played)})</span>` : ''}
     </div>
-    ${total ? blocks : `<div class="empty">Nessuna partita per questa data${state.league ? ' in questa competizione' : ''}.<br><br>
+    ${total ? blocks : `<div class="empty">Nessuna partita ${state.filter !== 'all' || state.time !== 'all' ? 'con questi filtri' : 'per questa data'}${state.league ? ' in questa competizione' : ''}.<br><br>
       <small>Le partite compaiono qualche giorno prima del turno. Usa le frecce per altre date.</small></div>`}
   `;
 
   const main = $('#main');
+  const fbar = main.querySelector('.filters'), dbar = main.querySelector('.days');
+  if (fbar) fbar.scrollLeft = prev.f;
+  if (dbar) {
+    if (prev.date === state.date) dbar.scrollLeft = prev.d;
+    else { const a = dbar.querySelector('.day.active'); if (a) dbar.scrollLeft = a.offsetLeft - (dbar.clientWidth - a.offsetWidth) / 2 - dbar.offsetLeft; }
+  }
+  main.querySelector('[data-time]')?.addEventListener('change', (e) => { state.time = e.target.value; renderList(); });
   main.querySelectorAll('[data-date]').forEach((el) => el.addEventListener('click', () => { location.hash = listHash(el.dataset.date, state.league); }));
   $('#main input[type=date]').addEventListener('change', (e) => { if (e.target.value) location.hash = listHash(e.target.value, state.league); });
   main.querySelectorAll('[data-filter]').forEach((el) => el.addEventListener('click', () => { state.filter = el.dataset.filter; renderList(); }));

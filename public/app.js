@@ -396,8 +396,10 @@ const initials = (n) => n.split(/\s+/).filter((w) => w.length > 1).slice(0, 2).m
 const crest = (name, logo) => (logo ? `<div class="crest img"><img src="${esc(logo)}" alt=""></div>`
   : `<div class="crest" style="background:${crestColor(name)}">${esc(initials(name))}</div>`);
 
-function renderDetail() {
+function renderDetail({ tabChanged = false } = {}) {
   const { match: m, league: l, prediction: p } = state.detail;
+  const panel = $('#detail');
+  const prevTabsLeft = panel.querySelector('.tabs')?.scrollLeft || 0;
   const fin = m.status === 'FT';
   const tabs = TABS.filter(([k]) => k !== 'table' || state.detail.standings.length);
   if (!tabs.some(([k]) => k === state.tab)) state.tab = 'pred';
@@ -422,7 +424,18 @@ function renderDetail() {
     <nav class="tabs">${tabs.map(([k, v]) => `<button class="tab ${state.tab === k ? 'active' : ''}" data-tab="${k}">${v}</button>`).join('')}</nav>
     <div class="d-body">${TAB_RENDER[state.tab]()}</div>`;
   $('#detail .d-close').addEventListener('click', () => closeDetail());
-  $('#detail').querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { state.tab = b.dataset.tab; renderDetail(); }));
+  // Keep the tab strip where it was (mobile) and, on a tab change, start the new tab from its top.
+  const strip = panel.querySelector('.tabs');
+  strip.scrollLeft = prevTabsLeft;
+  if (tabChanged) {
+    const head = panel.querySelector('.d-head').offsetHeight;
+    if (panel.scrollTop > head) panel.scrollTop = head;
+    const a = strip.querySelector('.tab.active');
+    if (a && (a.offsetLeft < strip.scrollLeft || a.offsetLeft + a.offsetWidth > strip.scrollLeft + strip.clientWidth)) {
+      strip.scrollLeft = a.offsetLeft - (strip.clientWidth - a.offsetWidth) / 2;
+    }
+  }
+  panel.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { if (state.tab === b.dataset.tab) return; state.tab = b.dataset.tab; renderDetail({ tabChanged: true }); }));
   $('#detail').querySelectorAll('[data-ttf]').forEach((b) => b.addEventListener('click', () => { state.trendTf = b.dataset.ttf; renderDetail(); }));
   $('#detail').querySelectorAll('[data-goto]').forEach((r) => r.addEventListener('click', () => { location.hash = `#/m/${encodeURIComponent(r.dataset.goto)}`; }));
 }

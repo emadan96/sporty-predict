@@ -593,3 +593,14 @@ html, .sidebar, .detail, .search-results, .card table.t, .table-scroll {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* Desktop: the competition header (with the column labels) stays visible under the top bar
+   while scrolling through that competition's matches. `clip` keeps the rounded corners
+   without breaking position: sticky (overflow: hidden would). */
+@media (min-width: 901px) {
+  .league-block { overflow: clip; }
+  .league-head {
+    position: sticky; top: var(--topbar-h); z-index: 5;
+    background: linear-gradient(color-mix(in srgb, var(--muted) 70%, transparent), color-mix(in srgb, var(--muted) 70%, transparent)), var(--card);
+  }
+}

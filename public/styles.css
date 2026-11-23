@@ -254,10 +254,17 @@ main { padding: calc(var(--spacing) * 6); min-width: 0; }
 .seg button.active { background: var(--primary); color: var(--primary-foreground); font-weight: 600; box-shadow: 0 1px 3px rgb(0 0 0 / .12); }
 
 /* ============================================================ match list */
-.league-block { background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow); }
-.league-head { display: flex; align-items: center; gap: 10px; padding: 11px 14px; font-weight: 600; cursor: pointer; user-select: none; }
-.league-head .country { color: var(--muted-foreground); font-weight: 500; font-size: 12px; }
-.league-head .lname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.league-block { background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 22px; overflow: hidden; box-shadow: var(--shadow); }
+.league-head {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px; font-weight: 600; cursor: pointer; user-select: none;
+  background: color-mix(in srgb, var(--muted) 70%, transparent); border-bottom: 1px solid var(--border);
+}
+.league-head .flag { width: 26px; height: 19px; border-radius: 4px; }
+.league-head .flag.logo { width: 26px; height: 26px; }
+.league-head .lt { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.league-head .lname { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.league-head .country { color: var(--muted-foreground); font-weight: 500; font-size: 11px; }
+.league-head.fav { box-shadow: inset 3px 0 0 var(--primary); }
 .league-head .lcount { color: var(--muted-foreground); font-weight: 500; font-size: 12px; background: var(--muted); border-radius: 999px; padding: 0 7px; }
 .league-block.collapsed .league-head { opacity: .6; }
 .league-head.static { cursor: default; }
@@ -273,6 +280,21 @@ main { padding: calc(var(--spacing) * 6); min-width: 0; }
 .top-chip { display: inline-flex; align-items: center; gap: 5px; }
 .top-chip.active .star { color: var(--primary-foreground); }
 .chip:disabled { opacity: .45; cursor: default; }
+.pin {
+  flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 999px; border: 0; background: transparent;
+  color: var(--muted-foreground); opacity: .55; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.pin:hover { opacity: 1; background: var(--muted); }
+.pin.on { opacity: 1; color: var(--primary-foreground); background: var(--primary); }
+.pin.on svg { fill: currentColor; }
+.league-head .pin { margin-left: 4px; }
+.side-item { position: relative; }
+.side-item .side-league { padding-right: 40px; }
+.side-item .pin { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; }
+.pin-mark { display: inline-flex; color: var(--foreground); }
+.pin-mark svg { width: 12px; height: 12px; fill: var(--primary); }
+.verdict p { margin: 0; line-height: 1.6; font-size: 14px; }
+.verdict b { font-weight: 700; }
 .hcols, .rcols { display: grid; grid-template-columns: var(--rc); gap: 4px; align-items: center; }
 .hcols { margin-left: auto; color: var(--muted-foreground); font-size: 11px; font-weight: 500; text-align: center; }
 
@@ -308,7 +330,7 @@ main { padding: calc(var(--spacing) * 6); min-width: 0; }
 
 .pc { text-align: center; font-size: 12px; border-radius: 8px; padding: 5px 0; color: var(--muted-foreground); position: relative; }
 .pc b { display: block; color: var(--foreground); font-size: 13px; font-weight: 600; }
-.pc.top { background: var(--primary); }
+.pc.top { background: color-mix(in srgb, var(--primary) 72%, transparent); }
 .pc.top b { color: var(--primary-foreground); }
 .pc.hi b { color: var(--accent-foreground); }
 .pc.hit { box-shadow: inset 0 0 0 1.5px var(--positive); }
@@ -506,7 +528,7 @@ html, .sidebar, .detail, .search-results, .card table.t, .table-scroll {
   .rcols { grid-column: 1 / -1; --rc: 1fr 1fr 1fr 1.25fr; }
   .rcols > :nth-child(-n+3), .rcols > :nth-child(n+7):nth-child(-n+10) { display: none; }
   .rcols .pc { padding: 6px 0 5px; background: var(--muted); }
-  .rcols .pc.top { background: var(--primary); }
+  .rcols .pc.top { background: color-mix(in srgb, var(--primary) 72%, transparent); }
   .rcols .pc::before { content: attr(data-l); display: block; font-size: 10px; font-weight: 500; opacity: .65; line-height: 1.1; }
   .rcols .pc.top::before { color: var(--primary-foreground); }
   .rcols .pc.idx { background: var(--accent); display: flex; flex-direction: column; justify-content: center; }

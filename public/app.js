@@ -43,8 +43,8 @@ const store = {
 };
 
 const state = {
-  leagues: [], dates: null, status: null, date: null, league: null, filter: 'all', time: 'all', topFirst: store.get('topFirst', true), data: null, detail: null, tab: 'pred',
-  tf: store.get('tf', 'FT'), trendTf: 'FT', collapsed: new Set(store.get('collapsed', [])),
+  leagues: [], dates: null, status: null, date: null, league: null, filter: 'all', time: 'all', topFirst: store.get('topFirst', true), favs: new Set(store.get('favs', [])), data: null, detail: null, tab: 'pred',
+  tf: 'FT', trendTf: 'FT', collapsed: new Set(store.get('collapsed', [])),
 };
 const leagueBy = (code) => state.leagues.find((l) => l.code === code) || state.data?.leagues.find((l) => l.code === code) || { code, name: code, country: '' };
 const leagueIcon = (l) => (l.logo ? `<img class="flag logo" src="${esc(l.logo)}" alt="" loading="lazy">`
@@ -134,25 +134,30 @@ function renderSidebar() {
     byCat.get(cat).push(l);
   }
   const item = (l) => `
-    <a class="side-league ${state.league === l.code ? 'active' : ''}" href="${listHash(state.date, l.code)}">
-      ${leagueIcon(l)}<span class="sl-txt"><span>${esc(l.name)}</span><span class="c">${esc(l.country)}</span></span>
-      <span class="cnt">${l.matches.length}</span>
-    </a>`;
+    <div class="side-item">
+      <a class="side-league ${state.league === l.code ? 'active' : ''}" href="${listHash(state.date, l.code)}">
+        ${leagueIcon(l)}<span class="sl-txt"><span>${esc(l.name)}</span><span class="c">${esc(l.country)}</span></span>
+        <span class="cnt">${l.matches.length}</span>
+      </a>${pinBtn(l.code)}
+    </div>`;
+  const favs = day.filter((l) => state.favs.has(l.code) && (!filter || `${l.name} ${l.country}`.toLowerCase().includes(filter)));
   const nav = $('#leagues');
   nav.innerHTML = `
     <a class="side-league ${!state.league ? 'active' : ''}" href="${listHash(state.date)}">⚽ <span class="sl-txt"><span>Tutte le competizioni</span></span>
       <span class="cnt">${day.reduce((s, l) => s + l.matches.length, 0)}</span></a>
+    ${favs.length ? `<div class="side-cat">Preferiti</div>${favs.map(item).join('')}` : ''}
     ${[...byCat].filter(([, ls]) => ls.length).map(([cat, ls]) => `<div class="side-cat">${esc(cat)}</div>${ls.map(item).join('')}`).join('')}
     ${!day.length ? '<div class="note" style="padding:8px 16px">Nessuna competizione in questa data.</div>' : ''}`;
+  nav.querySelectorAll('[data-pin]').forEach((b) => b.addEventListener('click', onPin));
 }
 
 const FILTERS = [
-  ['all', 'Tutte'], ['upcoming', 'In programma'], ['finished', 'Finite'], ['odds', 'Con quote'], ['value', 'Value bet'], ['alta', 'Alta fiducia'],
+  ['all', 'Tutte'], ['finished', 'Finite'], ['odds', 'Con quote'],
 ];
 
 // Kick-off time slots (Rome time). 'next' = not started yet, within the next 3 hours (today only).
 const TIME_SLOTS = [
-  ['all', 'Tutti gli orari'], ['next', 'Prossime 3 ore'], ['am', 'Fino alle 12:00'], ['12', '12:00 – 15:00'],
+  ['all', 'Tutti gli orari'], ['next1', 'Prossima ora'], ['next', 'Prossime 3 ore'], ['am', 'Fino alle 12:00'], ['12', '12:00 – 15:00'],
   ['15', '15:00 – 18:00'], ['18', '18:00 – 21:00'], ['21', 'Dalle 21:00'],
 ];
 const nowRomeMin = () => {
@@ -165,7 +170,7 @@ function passTime(m, slot = state.time) {
   if (!Number.isFinite(h)) return false;
   const t = h * 60 + (mm || 0);
   switch (slot) {
-    case 'next': { if (state.date !== todayRome() || m.status !== 'NS') return false; const n = nowRomeMin(); return t >= n && t <= n + 180; }
+    case 'next1': case 'next': { if (state.date !== todayRome() || m.status !== 'NS') return false; const n = nowRomeMin(); return t >= n && t <= n + (slot === 'next1' ? 60 : 180); }
     case 'am': return t < 720;
     case '12': return t >= 720 && t < 900;
     case '15': return t >= 900 && t < 1080;
@@ -183,6 +188,18 @@ function passFilter(m) {
 const MAJOR = ['AF2', 'AF3', 'AF848', 'AF531', 'I1', 'E0', 'SP1', 'D1', 'F1', 'AF1', 'AF4', 'AF5', 'AF9', 'AF32', 'AF34', 'AF29', 'AF30', 'AF31'];
 const majorRank = (code) => { const i = MAJOR.indexOf(code); return i < 0 ? Infinity : i; };
 const isMajor = (code) => MAJOR.includes(code);
+// Favourite competitions (saved in the browser): always first, before the major ones.
+const isFav = (code) => state.favs.has(code);
+const favRank = (code) => (isFav(code) ? 0 : 1);
+const PIN = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l-1 6 4 4v2H6v-2l4-4z"/></svg>';
+const pinBtn = (code) => `<button class="pin ${isFav(code) ? 'on' : ''}" data-pin="${esc(code)}" aria-pressed="${isFav(code)}" aria-label="${isFav(code) ? 'Togli dai preferiti' : 'Aggiungi ai preferiti'}" title="${isFav(code) ? 'Togli dai preferiti' : 'Aggiungi ai preferiti'}">${PIN}</button>`;
+function onPin(e) {
+  e.preventDefault(); e.stopPropagation();
+  const c = e.currentTarget.dataset.pin;
+  if (state.favs.has(c)) state.favs.delete(c); else state.favs.add(c);
+  store.set('favs', [...state.favs]);
+  renderSidebar(); renderList();
+}
 const STAR = '<svg class="star" viewBox="0 0 24 24" width="13" height="13" aria-label="Campionato principale"><path fill="currentColor" d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>';
 function passStatus(m) {
   switch (state.filter) {
@@ -209,16 +226,16 @@ function renderList() {
   const slotCount = Object.fromEntries(TIME_SLOTS.map(([k]) => [k, 0]));
   for (const l of leagues) for (const m of l.matches) if (passStatus(m)) for (const [k] of TIME_SLOTS) if (passTime(m, k)) slotCount[k]++;
   const isToday = state.date === todayRome();
-  if (state.time === 'next' && !isToday) state.time = 'all';
+  if (state.time.startsWith('next') && !isToday) state.time = 'all';
   let total = 0, hits = 0, played = 0;
   const byTime = state.time !== 'all'; // time filter: one list in kick-off order
-  const ordered = state.topFirst ? [...leagues].sort((a, b) => majorRank(a.code) - majorRank(b.code)) : leagues; // stable: the rest keeps its order
+  const ordered = [...leagues].sort((a, b) => favRank(a.code) - favRank(b.code) || (state.topFirst ? majorRank(a.code) - majorRank(b.code) : 0)); // stable: the rest keeps its order
   const hcols = `<div class="hcols"><span class="oh">1 · X · 2</span><span>AH</span><span>Tot</span>${cols.map(([n]) => `<span>${n}</span>`).join('')}<span>Esatto</span><span class="ih">Indice</span></div>`;
   let blocks;
   if (byTime) {
     const rows = [];
     for (const l of leagues) for (const m of l.matches) if (passFilter(m)) rows.push({ m, l });
-    rows.sort((a, b) => (a.m.time || '').localeCompare(b.m.time || '') || majorRank(a.l.code) - majorRank(b.l.code) || a.m.home.localeCompare(b.m.home));
+    rows.sort((a, b) => (a.m.time || '').localeCompare(b.m.time || '') || favRank(a.l.code) - favRank(b.l.code) || majorRank(a.l.code) - majorRank(b.l.code) || a.m.home.localeCompare(b.m.home));
     total = rows.length;
     for (const { m } of rows) if (m.status === 'FT' && m.pred) { played++; if (outcomeKey(m.ft) === topKey(m.pred.x12)) hits++; }
     const label = TIME_SLOTS.find(([k]) => k === state.time)?.[1] || '';
@@ -235,8 +252,8 @@ function renderList() {
     const collapsed = state.collapsed.has(l.code);
     return `
       <section class="league-block ${collapsed ? 'collapsed' : ''}">
-        <div class="league-head ${isMajor(l.code) ? 'major' : ''}" data-collapse="${esc(l.code)}">${leagueIcon(l)}<span class="country">${esc(l.country)}:</span> <span class="lname">${esc(l.name)}</span>${isMajor(l.code) ? STAR : ''}
-          <span class="lcount">${rows.length}</span>
+        <div class="league-head ${isMajor(l.code) ? 'major' : ''} ${isFav(l.code) ? 'fav' : ''}" data-collapse="${esc(l.code)}">${leagueIcon(l)}<span class="lt"><span class="lname">${esc(l.name)}</span><span class="country">${esc(l.country)}</span></span>${isMajor(l.code) ? STAR : ''}
+          <span class="lcount">${rows.length}</span>${pinBtn(l.code)}
           ${hcols}
         </div>
         ${collapsed ? '' : rows.map((m) => rowHtml(m, cols)).join('')}
@@ -264,10 +281,9 @@ function renderList() {
       <input type="date" value="${state.date}" min="${state.dates?.min || ''}" max="${state.dates?.max || ''}">
     </div>
     <div class="filters">
-      <div class="seg">${['FT', 'PT'].map((t) => `<button class="${state.tf === t ? 'active' : ''}" data-tf="${t}">${t === 'FT' ? 'Finale' : '1° tempo'}</button>`).join('')}</div>
       <label class="chip time-sel ${state.time !== 'all' ? 'active' : ''}" title="Filtra per orario d'inizio">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-        <select data-time aria-label="Orario">${TIME_SLOTS.filter(([k]) => k !== 'next' || isToday).map(([k, v]) => `<option value="${k}" ${state.time === k ? 'selected' : ''}>${v}${k === 'all' ? '' : ` (${slotCount[k]})`}</option>`).join('')}</select>
+        <select data-time aria-label="Orario">${TIME_SLOTS.filter(([k]) => !k.startsWith('next') || isToday).map(([k, v]) => `<option value="${k}" ${state.time === k ? 'selected' : ''}>${v}${k === 'all' ? '' : ` (${slotCount[k]})`}</option>`).join('')}</select>
       </label>
       <button class="chip top-chip ${state.topFirst && !byTime ? 'active' : ''}" data-top ${byTime ? 'disabled title="Con il filtro orario le partite sono in ordine di inizio"' : 'title="Coppe europee, top 5 campionati e grandi tornei per nazionali sempre in alto"'}>${STAR}Top in alto</button>
       ${FILTERS.map(([k, v]) => `<button class="chip ${state.filter === k ? 'active' : ''}" data-filter="${k}">${v}</button>`).join('')}
@@ -284,12 +300,12 @@ function renderList() {
     if (prev.date === state.date) dbar.scrollLeft = prev.d;
     else { const a = dbar.querySelector('.day.active'); if (a) dbar.scrollLeft = a.offsetLeft - (dbar.clientWidth - a.offsetWidth) / 2 - dbar.offsetLeft; }
   }
+  main.querySelectorAll('[data-pin]').forEach((b) => b.addEventListener('click', onPin));
   main.querySelector('[data-top]')?.addEventListener('click', () => { state.topFirst = !state.topFirst; store.set('topFirst', state.topFirst); renderList(); });
   main.querySelector('[data-time]')?.addEventListener('change', (e) => { state.time = e.target.value; renderList(); });
   main.querySelectorAll('[data-date]').forEach((el) => el.addEventListener('click', () => { location.hash = listHash(el.dataset.date, state.league); }));
   $('#main input[type=date]').addEventListener('change', (e) => { if (e.target.value) location.hash = listHash(e.target.value, state.league); });
   main.querySelectorAll('[data-filter]').forEach((el) => el.addEventListener('click', () => { state.filter = el.dataset.filter; renderList(); }));
-  main.querySelectorAll('[data-tf]').forEach((el) => el.addEventListener('click', () => { state.tf = el.dataset.tf; store.set('tf', state.tf); renderList(); }));
   main.querySelectorAll('[data-collapse]').forEach((el) => el.addEventListener('click', () => {
     const c = el.dataset.collapse;
     if (state.collapsed.has(c)) state.collapsed.delete(c); else state.collapsed.add(c);
@@ -350,10 +366,10 @@ function rowHtml(m, cols, league = null) {
     : m.statusText ? `<div class="time off">${esc(m.statusText)}</div>`
       : m.status === 'LIVE' ? '<div class="time live">Live</div>' : `<div class="time">${esc(m.time)}</div>`;
   return `
-    <div class="row ${league && isMajor(league.code) ? 'major' : ''}" data-id="${esc(m.id)}">
+    <div class="row ${league && (isMajor(league.code) || isFav(league.code)) ? 'major' : ''}" data-id="${esc(m.id)}">
       ${timeCell}
       <div class="teams">
-        ${league ? `<div class="tl">${leagueIcon(league)}<span>${esc(league.country)} · ${esc(league.name)}</span>${isMajor(league.code) ? STAR : ''}</div>` : ''}
+        ${league ? `<div class="tl">${leagueIcon(league)}<span>${esc(league.country)} · ${esc(league.name)}</span>${isMajor(league.code) ? STAR : ''}${isFav(league.code) ? `<i class="pin-mark">${PIN}</i>` : ''}</div>` : ''}
         <div class="t ${winH ? 'win' : ''}">${teamLogo(m.homeLogo)}<span>${esc(m.home)}</span>${p?.hasValue && !fin ? '<span class="badge value">VALUE</span>' : ''}</div>
         <div class="s num">${fin ? m.ft[0] : ''}${fin && m.ht ? `<span class="htsc">(${m.ht[0]})</span>` : ''}</div>
         <div class="t ${winA ? 'win' : ''}">${teamLogo(m.awayLogo)}<span>${esc(m.away)}</span></div>
@@ -517,11 +533,11 @@ const TAB_RENDER = {
         ${idx.length ? `<div class="card wide"><h3>Indice · mercati più solidi</h3><div class="idx-cards">
           ${idx.map((r, i) => `<div class="idx-card ${i === 0 ? 'first' : ''}"><small>${r.group === 'PT' ? '1° tempo' : 'Finale'}</small><b>${esc(r.label)}</b>
             <span class="num">${pct(r.score)}</span><small>modello ${pct(r.model)}${r.archive != null ? ` · archivio ${pct(r.archive)} (${r.n})` : ''}</small></div>`).join('')}
-        </div><div class="note">Mercati con quota giusta ≥ 1.30 dove modello e archivio di quote simili concordano di più (si usa il valore più prudente dei due).</div></div>` : ''}
+        </div></div>` : ''}
+        <div class="card wide verdict"><h3>Il pronostico</h3><p>${verdict(p, m)}</p></div>
         <div class="card picks"><h3>Pronostici principali</h3>
           ${p.picks.map((k) => `<div class="pick"><span class="cat">${esc(k.category)}</span><span class="lab">${esc(k.label)}</span>
             <span class="pp num">${pct(k.p)}</span><span class="fair num">@${fx(k.fair)}</span></div>`).join('')}
-          <div class="note">@ = quota "giusta" (1/probabilità). Conviene solo se il bookmaker paga di più.</div>
         </div>
         <div class="card"><h3>Under / Over finale</h3>${bars(ouItems(p.ft.over).filter((_, i) => i < 10), { hl: (i) => i.p >= 0.5 })}</div>
         <div class="card"><h3>Doppia chance · Goal</h3>
@@ -535,8 +551,7 @@ const TAB_RENDER = {
             <span class="num">${pct(v.p)}</span><span class="num">@${fx(v.odds)}</span><span class="edge num">+${pct(v.edge, 1)}</span></div>`).join('')
     : '<div class="note">Nessuna quota sopra il valore giusto stimato (margine minimo 3%).</div>'}
         </div>
-      </div>
-      ${modelNote(p)}`;
+      </div>`;
   },
 
   trend() {
@@ -560,8 +575,7 @@ const TAB_RENDER = {
             ${m.ft ? `<td class="r">${hit == null ? '–' : hit ? '<span class="ok">✔</span>' : '<span class="ko">✘</span>'}</td>` : ''}</tr>`;
   }).join('')}
       </table>
-      <div class="note">"Archivio" = frequenza reale nelle partite storiche il cui profilo di quote (1-X-2 e Over 2.5 senza aggio) è più vicino a questa partita.
-        Differenze grandi segnalano mercati in cui la storia diverge dal prezzo attuale.</div></div>`;
+      <div class="note">Archivio = come sono finite le partite passate con quote simili.</div></div>`;
   },
 
   ht() {
@@ -655,7 +669,7 @@ const TAB_RENDER = {
             <td class="r num">${fx(r.fairOver)}${value(r.fairOver, r.books, 0)}</td><td class="r num">${fx(r.fairUnder)}${value(r.fairUnder, r.books, 1)}</td>
             <td class="r num">${pct(r.pOver)}</td><td class="small">${bookCols(r.books) || '<span class="muted">non quotata</span>'}</td></tr>`).join('')}
           </table>
-          <div class="note">Sulle linee a quarto (es. −0.75, 2.25) metà puntata va sulla linea inferiore e metà sulla superiore; la quota giusta tiene conto dei rimborsi. "value" = almeno un bookmaker paga ≥3% sopra la quota giusta.</div></div>
+          </div>
       </div>`;
   },
 
@@ -689,9 +703,6 @@ const TAB_RENDER = {
             ${mi.market ? `<span class="k">Mercato (${esc(mi.market.x12?.book || '')})</span><span class="num">${fx(mi.market.lh)} – ${fx(mi.market.la)}</span>` : ''}
             ${mi.model ? `<span class="k">Rating (${esc(mi.model.pool)})</span><span class="num">${fx(mi.model.lh)} – ${fx(mi.model.la)}</span>` : '<span class="k">Rating squadre</span><span class="muted">non disponibili</span>'}
             <span class="k"><b>Finale</b></span><span class="num"><b>${fx(mi.final.lh)} – ${fx(mi.final.la)}</b></span>
-            <span class="k">Peso mercato</span><span class="num">${pct(mi.weights.market)}</span>
-            <span class="k">Peso archivio (FT / PT)</span><span class="num">${pct(mi.weights.archive)} / ${pct(mi.weights.archiveHt)}</span>
-            ${mi.market ? `<span class="k">Errore di calibrazione</span><span class="num">${pct(mi.market.fitError, 1)}</span>` : ''}
           </div>
         </div>
         ${p.archive ? `<div class="card wide"><h3>Partite storiche più simili</h3>
@@ -700,7 +711,7 @@ const TAB_RENDER = {
             <td class="r num">${pct(e.profile.h)} / ${pct(e.profile.d)} / ${pct(e.profile.a)}</td><td class="r num">${pct(e.profile.o)}</td>
             <td class="r num">${e.ht ? e.ht.join('-') : '–'}</td><td class="r num"><b>${e.ft.join('-')}</b></td></tr>`).join('')}
           </table></div>` : ''}
-        ${!odds.x12 ? '<div class="card wide"><div class="note">Quote non ancora disponibili per questa partita (di solito escono 1–14 giorni prima).</div></div>' : ''}
+        ${!odds.x12 ? '<div class="card wide"><div class="note">Quote non ancora disponibili.</div></div>' : ''}
       </div>`;
   },
 
@@ -744,17 +755,44 @@ const TAB_RENDER = {
 
 const k3 = ([h, a]) => (h > a ? '1' : h === a ? 'X' : '2');
 
-function modelNote(p) {
-  const mi = p.inputs;
-  const parts = [];
-  if (mi.market) {
-    const used = ['1X2', mi.market.ou && `total ${mi.market.ou.line}`, mi.market.ah && `handicap asiatico ${sgn(mi.market.ah.line)}`].filter(Boolean).join(' + ');
-    parts.push(`quote ${esc(mi.market.x12?.book)} (${used}) pesate ${pct(mi.weights.market)}`);
-  }
-  if (mi.model) parts.push(`rating squadre (${esc(mi.model.pool)}) su ${mi.model.sample} partite`);
-  else parts.push('rating squadre non disponibili');
-  if (p.archive) parts.push(`archivio di ${p.archive.n} partite con quote simili (peso ${pct(mi.weights.archive)})`);
-  return `<div class="note">Come è calcolato: ${parts.join(' · ')}. Le probabilità sono stime statistiche, non certezze.</div>`;
+/** Short written prediction built from the numbers of this match. */
+function verdict(p, m) {
+  const H = esc(m.home), A = esc(m.away);
+  const x = p.ft.x12;
+  const [gh, ga] = p.expected.xg;
+  const tot = gh + ga;
+  const o25 = p.ft.over['2.5'];
+  const gg = p.ft.btts.yes;
+  const ht05 = p.ht?.over?.['0.5'];
+  const SIMPLE = { 1: `vittoria ${H}`, X: 'pareggio', 2: `vittoria ${A}`, '1X': 'doppia chance 1X', X2: 'doppia chance X2', 12: 'doppia chance 12' };
+  const nice = (l) => SIMPLE[l] || esc(String(l).replace(/^MG PT /, 'Multigol 1° tempo ').replace(/^MG /, 'Multigol ').replace(/ PT$/, ' 1° tempo'));
+  const s = [];
+
+  const homeFav = x.home >= x.away;
+  const fav = homeFav ? H : A, other = homeFav ? A : H, pf = homeFav ? x.home : x.away;
+  if (x.draw >= Math.max(x.home, x.away)) s.push(`Partita molto equilibrata: il pareggio è l'esito più probabile (${pct(x.draw)}).`);
+  else if (pf >= 0.6) s.push(`<b>${fav}</b> è nettamente favorito (${pct(pf)})${homeFav ? '' : ' anche in trasferta'}.`);
+  else if (pf >= 0.45) s.push(`<b>${fav}</b> parte favorito (${pct(pf)}), ma ${other} può strappare un risultato: ${homeFav ? 'X2' : '1X'} al ${pct(1 - pf)}.`);
+  else s.push(`Partita aperta: ${H} ${pct(x.home)}, pareggio ${pct(x.draw)}, ${A} ${pct(x.away)}.`);
+
+  if (o25 >= 0.6) s.push(`Ci si aspettano goal: circa ${fx(tot, 1)} reti, Over 2.5 al ${pct(o25)}.`);
+  else if (o25 <= 0.42) s.push(`Pochi goal previsti (circa ${fx(tot, 1)}): Under 2.5 al ${pct(1 - o25)}.`);
+  else s.push(`Sui goal è in bilico: circa ${fx(tot, 1)} reti attese, Over 2.5 al ${pct(o25)}.`);
+
+  if (gg >= 0.58) s.push(`Entrambe dovrebbero segnare (Goal ${pct(gg)}).`);
+  else if (gg <= 0.42) s.push(`${gh < ga ? H : A} fatica a trovare la porta: No Goal al ${pct(1 - gg)}.`);
+
+  if (ht05 != null && ht05 >= 0.75) s.push(`Probabile almeno un goal già nel primo tempo (${pct(ht05)}).`);
+  else if (ht05 != null && ht05 <= 0.6) s.push(`Primo tempo bloccato: 0-0 all'intervallo al ${pct(1 - ht05)}.`);
+
+  const best = p.trends.index[0];
+  if (best) s.push(`La scelta più solida è <b>${nice(best.label)}${best.group === 'PT' && !/PT|1° tempo/.test(best.label) ? ' (1° tempo)' : ''}</b> (${pct(best.score)}); risultato più probabile ${esc(p.expected.ft.score)}.`);
+  else s.push(`Risultato più probabile ${esc(p.expected.ft.score)}.`);
+
+  const v = m.status !== 'FT' && p.value[0];
+  if (v) s.push(`Da tenere d'occhio: ${v.market === '1X2' ? nice(v.selection) : `${esc(v.market)} ${esc(v.selection)}`} a ${fx(v.odds)} (valore +${pct(v.edge, 1)}).`);
+  if (p.confidence === 'bassa') s.push('<span class="muted">Dati limitati: pronostico meno affidabile.</span>');
+  return s.join(' ');
 }
 
 // ---------------------------------------------------------------- search & boot

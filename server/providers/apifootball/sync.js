@@ -173,7 +173,7 @@ async function run({ log = console.log, force = false } = {}) {
           if (!body) break;
           fetched++;
           for (const it of body.response || []) if (save(it.fixture.id, it.bookmakers)) summary.oddsFixtures++;
-          if (fetched % 10 === 0) { await writeJson(file, store); log(`[api-football] quote ${d}: ${fetched}/${fixtures.length} · quota rimasta ${api.quota.dayRemaining ?? '?'}`); }
+          if (fetched % 10 === 0) { await writeJson(file, store); log(`[api-football] quote ${d}: ${fetched}/${fixtures.length} · quota rimasta ${api.quota.dayRemaining ?? '?'} · ${Math.round((Date.now() - t) / 1000)} s`); }
         }
         complete = fetched === fixtures.length;
       }

@@ -33,6 +33,11 @@ function leaguePriority(L) {
 }
 
 const HOUR = 3_600_000;
+// Free plan budget split: per-fixture odds stop while this many calls are still left, so the
+// runs later in the day can refresh fixtures and results (one call each).
+const FIXTURE_RESERVE = Number(process.env.APIFOOTBALL_FIXTURE_RESERVE || 20);
+// Hard stop for the per-fixture odds loop (protects CI minutes if the API gets slow).
+const MAX_ODDS_MINUTES = Number(process.env.APIFOOTBALL_MAX_MINUTES || 20);
 
 async function ageHours(file) {
   try { return (Date.now() - (await fs.stat(file)).mtimeMs) / HOUR; } catch { return Infinity; }
@@ -117,7 +122,7 @@ async function run({ log = console.log, force = false } = {}) {
   for (const d of days) {
     if (!dayAllowed(d)) continue;
     const file = path.join(AF_DIR, 'fixtures', `${d}.json`);
-    const ttl = d < today ? (free ? 24 : 12) : d === today ? (free ? 6 : 1) : 6;
+    const ttl = d < today ? (free ? 24 : 12) : d === today ? (free ? 1.5 : 1) : 6; // today: every run (2h) refreshes results
     if (!(await due(file, ttl))) continue;
     const r = await guard(`fixtures ${d}`, async () => {
       const body = await api.get('fixtures', { date: d, timezone: 'Europe/Rome' }, { cache: false });
@@ -168,7 +173,8 @@ async function run({ log = console.log, force = false } = {}) {
         let fetched = 0;
         if (fixtures.length) log(`[api-football] quote ${d}: ${items.length} dalle pagine, ora ${fixtures.length} partite una per una (priorità: coppe europee, nazionali, Italia, grandi campionati)`);
         for (const f of fixtures) {
-          if (api.budgetLeft() <= (free ? 12 : 50)) { summary.skipped.push(`odds ${d}: ${fixtures.length - fetched} partite minori senza quote (quota)`); break; }
+          if (api.budgetLeft() <= (free ? FIXTURE_RESERVE : 50)) { summary.skipped.push(`odds ${d}: ${fixtures.length - fetched} partite minori senza quote (quota)`); break; }
+          if (Date.now() - t > MAX_ODDS_MINUTES * 60_000) { summary.skipped.push(`odds ${d}: interrotto dopo ${MAX_ODDS_MINUTES} minuti`); break; }
           const body = await api.get('odds', { fixture: f.fixture.id }, { cache: false }).catch((e) => { if (e instanceof QuotaError) return null; throw e; });
           if (!body) break;
           fetched++;

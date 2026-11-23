@@ -5,8 +5,8 @@ name: Pubblica pronostici
 
 on:
   schedule:
-    - cron: '0 5 * * *'    # ogni giorno alle 06:00 (ora italiana, 07:00 con l'ora legale)
-    - cron: '0 15 * * *'   # e alle 16:00, per le quote più recenti
+    # ogni 2 ore dalle 9 alle 23 ora italiana (orari GitHub in UTC; con l'ora legale dalle 10 alle 24)
+    - cron: '0 8-22/2 * * *'
   workflow_dispatch:       # pulsante "Run workflow" per aggiornare a mano
   push:
     branches: [main]

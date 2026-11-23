@@ -47,8 +47,17 @@ const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).form
 const addDays = (d, n) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const counts = {};
 const search = [];
-for (let n = -DAYS_BACK; n <= DAYS_AHEAD; n++) {
-  const date = addDays(today, n);
+// Cloudflare (free) accepts at most 20,000 files per site: one file per match, so with many
+// competitions the window shrinks, dropping the farthest days first (past before future).
+const MAX_MATCH_FILES = Number(process.env.STATIC_MAX_MATCHES || 18_000);
+let window = [];
+for (let n = -DAYS_BACK; n <= DAYS_AHEAD; n++) window.push({ n, date: addDays(today, n), count: store.byDate(addDays(today, n)).length });
+while (window.reduce((s, w) => s + w.count, 0) > MAX_MATCH_FILES && window.length > 1) {
+  const back = window[0], ahead = window.at(-1);
+  if (back.n < 0 && (-back.n >= ahead.n || ahead.n <= 2)) window.shift(); else window.pop();
+}
+if (window.length < DAYS_BACK + DAYS_AHEAD + 1) console.log(`[build] troppe partite: pubblico ${window[0].date} → ${window.at(-1).date}`);
+for (const { date } of window) {
   const ms = store.byDate(date);
   if (!ms.length) continue;
   counts[date] = ms.length;

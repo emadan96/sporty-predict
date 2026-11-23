@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       TZ: Europe/Rome
       APIFOOTBALL_KEY: ${{ secrets.APIFOOTBALL_KEY }}

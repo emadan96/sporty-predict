@@ -81,7 +81,14 @@ async function run({ log = console.log, force = false } = {}) {
 
   // Subscription status (free call). Free plan defaults until we learn the exact limits from errors.
   const st = await api.status().catch(() => null);
-  if (st) Object.assign(plan, { name: st.plan, limit: st.limit, end: st.end, checkedAt: new Date().toISOString() });
+  if (st) {
+    // New subscription (e.g. Free -> Pro): forget the limits learned from the old plan's refusals.
+    if (plan.name && plan.name !== st.plan) {
+      log(`[api-football] piano cambiato: ${plan.name} → ${st.plan}, limiti precedenti azzerati`);
+      for (const k of ['dayFrom', 'dayTo', 'seasonMin', 'seasonMax', 'maxPage']) delete plan[k];
+    }
+    Object.assign(plan, { name: st.plan, limit: st.limit, end: st.end, checkedAt: new Date().toISOString() });
+  }
   const free = /free/i.test(plan.name || '') || (plan.limit && plan.limit <= 100);
   if (free) {
     plan.dayFrom ??= -1; plan.dayTo ??= 1; plan.seasonMax ??= 2024;

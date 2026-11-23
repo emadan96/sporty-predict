@@ -368,11 +368,23 @@ main { padding: calc(var(--spacing) * 6); min-width: 0; }
 .sb-mid .sub b { color: var(--foreground); }
 .xgline { text-align: center; color: var(--muted-foreground); font-size: 12px; padding-bottom: 12px; }
 .xgline b { color: var(--foreground); }
-.tabs {
-  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding: 0 22px;
-  position: sticky; top: 0; z-index: 3; background: var(--card); border-bottom: 1px solid var(--border);
-}
+.tabs-wrap { position: sticky; top: 0; z-index: 3; background: var(--card); border-bottom: 1px solid var(--border); }
+.tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding: 0 22px; }
+@media (hover: hover) and (pointer: fine) { .tabs { cursor: grab; } }
+.tabs.panning { cursor: grabbing; user-select: none; }
+.tabs.panning .tab { pointer-events: none; }
 .tabs::-webkit-scrollbar { display: none; }
+/* side arrows: only with a mouse, only when there are hidden tabs on that side */
+.tabs-arrow {
+  display: none; position: absolute; top: 0; bottom: 0; width: 44px; border: 0; z-index: 1; cursor: pointer;
+  font-size: 22px; line-height: 1; color: var(--foreground); padding: 0;
+}
+.tabs-arrow.l { left: 0; text-align: left; padding-left: 10px; background: linear-gradient(to right, var(--card) 55%, transparent); }
+.tabs-arrow.r { right: 0; text-align: right; padding-right: 10px; background: linear-gradient(to left, var(--card) 55%, transparent); }
+.tabs-arrow:hover { color: var(--primary); }
+@media (hover: hover) and (pointer: fine) {
+  .tabs-wrap.can-l .tabs-arrow.l, .tabs-wrap.can-r .tabs-arrow.r { display: block; }
+}
 .tab { padding: 12px 10px; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted-foreground); white-space: nowrap; font-weight: 500; font-size: 13px; }
 .tab:hover { color: var(--foreground); }
 .tab.active { color: var(--foreground); border-bottom-color: var(--foreground); }

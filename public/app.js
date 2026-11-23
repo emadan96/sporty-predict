@@ -437,7 +437,11 @@ function renderDetail({ tabChanged = false } = {}) {
         ${p.ah ? ` · AH <b class="num">${sgn(p.ah.line)}</b>` : ''}${p.totalLine ? ` · Total <b class="num">${p.totalLine.line}</b>` : ''}
         ${m.xg ? ` · xG reali <b class="num">${fx(m.xg[0])} – ${fx(m.xg[1])}</b>` : ''}</div>
     </div>
-    <nav class="tabs">${tabs.map(([k, v]) => `<button class="tab ${state.tab === k ? 'active' : ''}" data-tab="${k}">${v}</button>`).join('')}</nav>
+    <div class="tabs-wrap">
+      <button class="tabs-arrow l" data-tscroll="-1" aria-label="Schede precedenti" tabindex="-1">‹</button>
+      <nav class="tabs">${tabs.map(([k, v]) => `<button class="tab ${state.tab === k ? 'active' : ''}" data-tab="${k}">${v}</button>`).join('')}</nav>
+      <button class="tabs-arrow r" data-tscroll="1" aria-label="Schede successive" tabindex="-1">›</button>
+    </div>
     <div class="d-body">${TAB_RENDER[state.tab]()}</div>`;
   $('#detail .d-close').addEventListener('click', () => closeDetail());
   // Keep the tab strip where it was (mobile) and, on a tab change, start the new tab from its top.
@@ -451,6 +455,48 @@ function renderDetail({ tabChanged = false } = {}) {
       strip.scrollLeft = a.offsetLeft - (strip.clientWidth - a.offsetWidth) / 2;
     }
   }
+  // Desktop: arrows when tabs overflow, and the mouse wheel scrolls the strip sideways.
+  const wrap = panel.querySelector('.tabs-wrap');
+  const updateArrows = () => {
+    wrap.classList.toggle('can-l', strip.scrollLeft > 2);
+    wrap.classList.toggle('can-r', strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 2);
+  };
+  strip.addEventListener('scroll', updateArrows, { passive: true });
+  strip.addEventListener('wheel', (e) => {
+    if (strip.scrollWidth <= strip.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    strip.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+  // Mouse pan: press and drag the strip sideways (a drag never counts as a tab click).
+  let pan = null;
+  strip.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || strip.scrollWidth <= strip.clientWidth) return;
+    pan = { x: e.clientX, left: strip.scrollLeft, moved: false, id: e.pointerId };
+  });
+  strip.addEventListener('pointermove', (e) => {
+    if (!pan || e.pointerId !== pan.id) return;
+    const dx = e.clientX - pan.x;
+    if (!pan.moved && Math.abs(dx) < 5) return;
+    if (!pan.moved) { pan.moved = true; try { strip.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ } strip.classList.add('panning'); }
+    strip.scrollLeft = pan.left - dx;
+  });
+  const endPan = (e) => {
+    if (!pan || e.pointerId !== pan.id) return;
+    if (pan.moved) {
+      strip.classList.remove('panning');
+      // Swallow the click that follows the drag (if the browser fires one), then stop listening.
+      const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      strip.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => strip.removeEventListener('click', swallow, { capture: true }), 0);
+    }
+    pan = null;
+  };
+  strip.addEventListener('pointerup', endPan);
+  strip.addEventListener('pointercancel', endPan);
+  wrap.querySelectorAll('[data-tscroll]').forEach((b) => b.addEventListener('click', () => {
+    strip.scrollBy({ left: Number(b.dataset.tscroll) * strip.clientWidth * 0.7, behavior: 'smooth' });
+  }));
+  updateArrows();
   panel.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { if (state.tab === b.dataset.tab) return; state.tab = b.dataset.tab; renderDetail({ tabChanged: true }); }));
   $('#detail').querySelectorAll('[data-ttf]').forEach((b) => b.addEventListener('click', () => { state.trendTf = b.dataset.ttf; renderDetail(); }));
   $('#detail').querySelectorAll('[data-goto]').forEach((r) => r.addEventListener('click', () => { location.hash = `#/m/${encodeURIComponent(r.dataset.goto)}`; }));

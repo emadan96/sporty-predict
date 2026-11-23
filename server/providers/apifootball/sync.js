@@ -133,7 +133,9 @@ async function run({ log = console.log, force = false } = {}) {
   }
 
   // 3) odds snapshots. Today/tomorrow first (provider refreshes every 3h; on Free every 12h to fit the quota).
-  const oddsDay = async (d, ttl) => {
+  const tried = new Set(); // fixtures already requested in this run (some have no odds yet: never ask twice)
+  // maxPrio: only fixtures of competitions at least this important (lower = more important).
+  const oddsDay = async (d, ttl, maxPrio = 10_000) => {
     if (!dayAllowed(d)) return null;
     const file = path.join(AF_DIR, 'odds', `${d}.json`);
     const marker = path.join(AF_DIR, 'odds', `.${d}.fetched`);
@@ -167,21 +169,22 @@ async function run({ log = console.log, force = false } = {}) {
         // Plan caps pagination: fetch the remaining important fixtures one by one, within the quota.
         const seen = new Set(items.map((it) => it.fixture.id));
         const fixtures = (await readJson(path.join(AF_DIR, 'fixtures', `${d}.json`), []))
-          .filter((f) => !seen.has(f.fixture.id) && ['NS', 'TBD'].includes(f.fixture.status?.short) && leaguePriority(f.league) < 10_000)
+          .filter((f) => !seen.has(f.fixture.id) && ['NS', 'TBD'].includes(f.fixture.status?.short) && leaguePriority(f.league) < maxPrio && !tried.has(f.fixture.id))
           .filter((f) => !store[f.fixture.id] || t - store[f.fixture.id].last.t > ttl * HOUR)
           .sort((a, b) => leaguePriority(a.league) - leaguePriority(b.league) || a.fixture.timestamp - b.fixture.timestamp);
         let fetched = 0;
         if (fixtures.length) log(`[api-football] quote ${d}: ${items.length} dalle pagine, ora ${fixtures.length} partite una per una (priorità: coppe europee, nazionali, Italia, grandi campionati)`);
         for (const f of fixtures) {
-          if (api.budgetLeft() <= (free ? FIXTURE_RESERVE : 50)) { summary.skipped.push(`odds ${d}: ${fixtures.length - fetched} partite minori senza quote (quota)`); break; }
+          if (api.budgetLeft() <= (free ? FIXTURE_RESERVE : 50)) { summary.skipped.push(`odds ${d}: ${fixtures.length - fetched} partite senza quote (quota esaurita)`); break; }
           if (Date.now() - t > MAX_ODDS_MINUTES * 60_000) { summary.skipped.push(`odds ${d}: interrotto dopo ${MAX_ODDS_MINUTES} minuti`); break; }
+          tried.add(f.fixture.id);
           const body = await api.get('odds', { fixture: f.fixture.id }, { cache: false }).catch((e) => { if (e instanceof QuotaError) return null; throw e; });
           if (!body) break;
           fetched++;
           for (const it of body.response || []) if (save(it.fixture.id, it.bookmakers)) summary.oddsFixtures++;
           if (fetched % 10 === 0) { await writeJson(file, store); log(`[api-football] quote ${d}: ${fetched}/${fixtures.length} · quota rimasta ${api.quota.dayRemaining ?? '?'} · ${Math.round((Date.now() - t) / 1000)} s`); }
         }
-        complete = fetched === fixtures.length;
+        complete = fetched === fixtures.length && maxPrio >= 10_000; // a partial pass never closes the day
       }
       await writeJson(file, store);
       if (!complete) return items.reason === 'quota' ? 'quota' : 'partial';
@@ -190,7 +193,14 @@ async function run({ log = console.log, force = false } = {}) {
       return 'ok';
     });
   };
-  for (const d of [today, addDays(today, 1)]) if ((await oddsDay(d, free ? 12 : 3)) === 'quota') break;
+  // Priority across today AND tomorrow: important competitions of both days first (European cups,
+  // national teams, Italy, main leagues), then everything else.
+  const oddsTtl = free ? 12 : 3;
+  for (const maxPrio of [60, 300, 10_000]) {
+    let stop = false;
+    for (const d of [today, addDays(today, 1)]) if ((await oddsDay(d, oddsTtl, maxPrio)) === 'quota') { stop = true; break; }
+    if (stop) break;
+  }
 
   // 4) histories of every league with fixtures in the window (not covered by football-data)
   const leagueSeasons = new Map(); // leagueId -> { season, count }

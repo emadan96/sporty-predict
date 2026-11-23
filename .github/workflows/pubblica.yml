@@ -6,7 +6,8 @@ name: Pubblica pronostici
 on:
   schedule:
     # ogni 2 ore dalle 9 alle 23 ora italiana (orari GitHub in UTC; con l'ora legale dalle 10 alle 24)
-    - cron: '0 8-22/2 * * *'
+    # minuto 17: lo scoccare dell'ora è l'orario più affollato di GitHub e i lanci vengono ritardati o saltati
+    - cron: '17 8-22/2 * * *'
   workflow_dispatch:       # pulsante "Run workflow" per aggiornare a mano
   push:
     branches: [main]

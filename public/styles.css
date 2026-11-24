@@ -604,3 +604,27 @@ html, .sidebar, .detail, .search-results, .card table.t, .table-scroll {
     background: linear-gradient(color-mix(in srgb, var(--muted) 70%, transparent), color-mix(in srgb, var(--muted) 70%, transparent)), var(--card);
   }
 }
+
+/* ============================================================ match sheet: overview & sub-sections */
+.subnav { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 0 14px; padding-bottom: 2px; }
+.subnav::-webkit-scrollbar { display: none; }
+.subnav .chip { flex: none; }
+.pre-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 36px 48px; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.pre-row:last-of-type { border-bottom: 0; }
+.pre-row .pr-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pre-row .pr-pos { text-align: right; color: var(--muted-foreground); font-size: 13px; }
+.pre-row .pr-pts { text-align: right; font-weight: 600; font-size: 13px; }
+.h2h-sum { display: grid; gap: 8px; }
+.h2h-nums { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted-foreground); }
+.h2h-nums b { color: var(--foreground); font-size: 16px; margin: 0 2px; }
+.h2h-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; gap: 2px; background: var(--muted); }
+.h2h-bar i { background: var(--primary); min-width: 0; }
+.h2h-bar i.d { background: var(--muted-foreground); opacity: .5; }
+.h2h-bar i.a { background: var(--chart-2, #38bdf8); }
+.qodds td.best { color: var(--primary-foreground); }
+.qodds td.best { background: color-mix(in srgb, var(--primary) 55%, transparent); border-radius: 6px; font-weight: 700; }
+.qlines { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 12px; font-size: 13px; color: var(--muted-foreground); }
+.qlines b { color: var(--foreground); }
+.more { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--foreground); text-decoration: none; }
+.card > .more { display: inline-block; margin-top: 10px; }
+.more:hover { color: var(--primary); }

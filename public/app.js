@@ -43,7 +43,7 @@ const store = {
 };
 
 const state = {
-  leagues: [], dates: null, status: null, date: null, league: null, filter: 'all', time: 'all', topFirst: store.get('topFirst', true), favs: new Set(store.get('favs', [])), data: null, detail: null, tab: 'pred',
+  leagues: [], dates: null, status: null, date: null, league: null, filter: 'all', time: 'all', topFirst: store.get('topFirst', true), favs: new Set(store.get('favs', [])), data: null, detail: null, tab: 'over', sub: { pred: 'ft', odds: 'book' },
   tf: 'FT', trendTf: 'FT', collapsed: new Set(store.get('collapsed', [])),
 };
 const leagueBy = (code) => state.leagues.find((l) => l.code === code) || state.data?.leagues.find((l) => l.code === code) || { code, name: code, country: '' };
@@ -387,7 +387,7 @@ async function openDetail(id) {
   if (state.detail?.match.id !== id) {
     panel.innerHTML = '<div class="loading">Calcolo pronostico completo…</div>';
     try { state.detail = await api(`/api/match?id=${encodeURIComponent(id)}`); } catch (e) { panel.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
-    state.tab = 'pred';
+    state.tab = 'over'; state.sub = { pred: 'ft', odds: 'book' };
   }
   renderDetail();
 }
@@ -398,10 +398,8 @@ function closeDetail(navigate = true) {
   if (navigate) location.hash = listHash(state.date || todayRome(), state.league);
 }
 
-const TABS = [
-  ['pred', 'Pronostico'], ['trend', 'Trend archivio'], ['ht', '1° Tempo'], ['mg', 'Multigol'], ['cs', 'Risultato esatto'], ['htft', 'Parziale/Finale'],
-  ['asian', 'Linee asiatiche'], ['odds', 'Quote & Bookmaker'], ['form', 'Forma & H2H'], ['table', 'Classifica'],
-];
+// Few, short tabs: an overview first, then the details grouped by topic.
+const TABS = [['over', 'Panoramica'], ['pred', 'Pronostici'], ['odds', 'Quote'], ['form', 'Partite'], ['table', 'Classifica']];
 
 const crestColor = (name) => {
   let h = 0;
@@ -418,7 +416,7 @@ function renderDetail({ tabChanged = false } = {}) {
   const prevTabsLeft = panel.querySelector('.tabs')?.scrollLeft || 0;
   const fin = m.status === 'FT';
   const tabs = TABS.filter(([k]) => k !== 'table' || state.detail.standings.length);
-  if (!tabs.some(([k]) => k === state.tab)) state.tab = 'pred';
+  if (!tabs.some(([k]) => k === state.tab)) state.tab = 'over';
   $('#detail').innerHTML = `
     <div class="d-head">
       <div class="d-top">${leagueIcon(l)} ${esc(l.country)} · ${esc(l.name)}${m.round ? ` · ${esc(m.round)}` : ''} · ${fmtDateLong(m.date)} ${esc(m.time)}
@@ -498,6 +496,12 @@ function renderDetail({ tabChanged = false } = {}) {
   }));
   updateArrows();
   panel.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { if (state.tab === b.dataset.tab) return; state.tab = b.dataset.tab; renderDetail({ tabChanged: true }); }));
+  panel.querySelectorAll('[data-sub]').forEach((b) => b.addEventListener('click', () => {
+    const [tab, k] = b.dataset.sub.split(':');
+    if (state.sub[tab] === k) return;
+    state.sub[tab] = k; renderDetail({ tabChanged: true });
+  }));
+  panel.querySelectorAll('[data-gotab]').forEach((b) => b.addEventListener('click', () => { state.tab = b.dataset.gotab; renderDetail({ tabChanged: true }); }));
   $('#detail').querySelectorAll('[data-ttf]').forEach((b) => b.addEventListener('click', () => { state.trendTf = b.dataset.ttf; renderDetail(); }));
   $('#detail').querySelectorAll('[data-goto]').forEach((r) => r.addEventListener('click', () => { location.hash = `#/m/${encodeURIComponent(r.dataset.goto)}`; }));
 }
@@ -568,19 +572,99 @@ function trendHit(label, ft, ht) {
   return null;
 }
 
+const subnav = (tab, items, cur) => `<div class="subnav">${items.map(([k, v]) => `<button class="chip ${k === cur ? 'active' : ''}" data-sub="${tab}:${k}">${v}</button>`).join('')}</div>`;
+
 const TAB_RENDER = {
-  pred() {
-    const p = state.detail.prediction;
-    const m = state.detail.match;
+  // Overview (first tab): the whole match at a glance, top to bottom like a match page summary.
+  over() {
+    const { prediction: p, match: m, odds, form, h2h, standings, move, league: l } = state.detail;
     const idx = p.trends.index;
+    const L = odds.labels;
+
+    // compact odds comparison: a few reference books, best price per column highlighted
+    const x = odds.x12;
+    const books = x ? ['ps', 'b365', 'sbo', 'bfe', 'x1', 'avg'].filter((b) => x[b]).slice(0, 5) : [];
+    const best = [0, 1, 2].map((i) => Math.max(...books.filter((b) => b !== 'avg').map((b) => x[b][i])));
+    const oddsCard = books.length ? `
+      <div class="card wide"><h3>Quote 1X2</h3>
+        <table class="t qodds"><tr><th>Bookmaker</th><th class="r">1</th><th class="r">X</th><th class="r">2</th></tr>
+        ${books.map((b) => `<tr class="${b === 'avg' ? 'agg' : ''}"><td>${esc(L[b] || b)}</td>${x[b].map((o, i) => `<td class="r num ${b !== 'avg' && o === best[i] ? 'best' : ''}">${fx(o)}</td>`).join('')}</tr>`).join('')}
+        </table>
+        <div class="qlines">
+          ${move.cur?.ah ? `<span>Handicap asiatico <b class="num">${sgn(move.cur.ah.line)}</b> · <span class="num">${fx(move.cur.ah.odds[0])} / ${fx(move.cur.ah.odds[1])}</span></span>` : ''}
+          ${move.cur?.ou ? `<span>Total <b class="num">${move.cur.ou.line}</b> · <span class="num">${fx(move.cur.ou.odds[0])} / ${fx(move.cur.ou.odds[1])}</span></span>` : ''}
+          <a href="javascript:void 0" class="more" data-gotab="odds">Tutte le quote ›</a>
+        </div>
+      </div>` : '';
+
+    // pre-match form: last 5 results, plus position and points when the league table exists
+    const pos = (key) => { const i = standings.findIndex((r) => r.team === key); return i < 0 ? null : { pos: i + 1, pts: standings[i].pts }; };
+    const preRow = (name, logo, list, s) => `<div class="pre-row">
+        ${teamLogo(logo)}<span class="pr-name">${esc(name)}</span>
+        <span class="form">${list.slice(0, 5).map((r) => `<i class="${r.result}">${r.result}</i>`).join('') || '<span class="muted small">–</span>'}</span>
+        <span class="pr-pos num">${s ? `${s.pos}°` : ''}</span><span class="pr-pts num">${s ? `${s.pts} pt` : ''}</span>
+      </div>`;
+    let hw = 0, dr = 0, aw = 0;
+    for (const g of h2h) {
+      if (!g.ft) continue;
+      if (g.ft[0] === g.ft[1]) { dr++; continue; }
+      const w = g.ft[0] > g.ft[1] ? g.home : g.away;
+      if (w === m.home) hw++; else if (w === m.away) aw++;
+    }
+    const n = hw + dr + aw;
+    const h2hBar = n ? `
+      <div class="h2h-sum">
+        <div class="h2h-nums"><span><b class="num">${hw}</b> ${esc(m.home)}</span><span><b class="num">${dr}</b> pareggi</span><span>${esc(m.away)} <b class="num">${aw}</b></span></div>
+        <div class="h2h-bar"><i style="flex:${hw}"></i><i class="d" style="flex:${dr}"></i><i class="a" style="flex:${aw}"></i></div>
+      </div>` : '<div class="note">Nessun precedente negli archivi.</div>';
+
+    const upd = move.updated ? new Date(move.updated).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
     return `
       <div class="cards">
+        <div class="card wide verdict"><h3>Il pronostico</h3><p>${verdict(p, m)}</p></div>
         <div class="card wide"><h3>Esito finale 1X2</h3>${tri(p.ft.x12, ['1 · ' + m.home, 'X · Pareggio', '2 · ' + m.away], refX12())}</div>
-        ${idx.length ? `<div class="card wide"><h3>Indice · mercati più solidi</h3><div class="idx-cards">
+        ${idx.length ? `<div class="card wide"><h3>Mercati più solidi</h3><div class="idx-cards">
           ${idx.map((r, i) => `<div class="idx-card ${i === 0 ? 'first' : ''}"><small>${r.group === 'PT' ? '1° tempo' : 'Finale'}</small><b>${esc(r.label)}</b>
             <span class="num">${pct(r.score)}</span><small>modello ${pct(r.model)}${r.archive != null ? ` · archivio ${pct(r.archive)} (${r.n})` : ''}</small></div>`).join('')}
         </div></div>` : ''}
-        <div class="card wide verdict"><h3>Il pronostico</h3><p>${verdict(p, m)}</p></div>
+        ${oddsCard}
+        <div class="card wide"><h3>Forma pre-partita</h3>
+          ${preRow(m.home, m.homeLogo, form.home, pos(m.homeKey || m.home))}
+          ${preRow(m.away, m.awayLogo, form.away, pos(m.awayKey || m.away))}
+          <div class="note">Ultime 5 partite, dalla più recente.</div>
+        </div>
+        <div class="card wide"><h3>Testa a testa</h3>${h2hBar}
+          ${n ? '<a href="javascript:void 0" class="more" data-gotab="form">Tutti i precedenti ›</a>' : ''}</div>
+        <div class="card wide"><h3>Info partita</h3><div class="kv">
+          <span class="k">Data e ora</span><span class="num">${fmtDateLong(m.date)} · ${esc(m.time)}</span>
+          <span class="k">Competizione</span><span>${esc(l.country)} · ${esc(l.name)}${m.round ? ` · ${esc(m.round)}` : ''}</span>
+          ${m.venue ? `<span class="k">Stadio</span><span>${esc(m.venue)}</span>` : ''}
+          ${m.referee ? `<span class="k">Arbitro</span><span>${esc(m.referee)}</span>` : ''}
+          ${upd ? `<span class="k">Quote aggiornate</span><span class="num">${upd}</span>` : ''}
+        </div></div>
+      </div>`;
+  },
+
+  // Predictions: every market, grouped in sub-sections.
+  pred() {
+    const SUB = [['ft', 'Finale'], ['ht', '1° tempo'], ['mg', 'Multigol'], ['cs', 'Risultato esatto'], ['htft', 'Parziale/Finale'], ['trend', 'Archivio']];
+    const cur = SUB.some(([k]) => k === state.sub.pred) ? state.sub.pred : 'ft';
+    const body = { ft: 'predFt', ht: 'ht', mg: 'mg', cs: 'cs', htft: 'htft', trend: 'trend' }[cur];
+    return `${subnav('pred', SUB, cur)}${TAB_RENDER[body]()}`;
+  },
+
+  // Odds: bookmaker comparison and Asian lines.
+  odds() {
+    const SUB = [['book', 'Bookmaker'], ['asian', 'Linee asiatiche']];
+    const cur = SUB.some(([k]) => k === state.sub.odds) ? state.sub.odds : 'book';
+    return `${subnav('odds', SUB, cur)}${TAB_RENDER[cur === 'book' ? 'oddsBook' : 'asian']()}`;
+  },
+
+  predFt() {
+    const p = state.detail.prediction;
+    const m = state.detail.match;
+    return `
+      <div class="cards">
         <div class="card picks"><h3>Pronostici principali</h3>
           ${p.picks.map((k) => `<div class="pick"><span class="cat">${esc(k.category)}</span><span class="lab">${esc(k.label)}</span>
             <span class="pp num">${pct(k.p)}</span><span class="fair num">@${fx(k.fair)}</span></div>`).join('')}
@@ -719,7 +803,7 @@ const TAB_RENDER = {
       </div>`;
   },
 
-  odds() {
+  oddsBook() {
     const { odds, prediction: p, move } = state.detail;
     const L = odds.labels;
     const BOOKS = ['ps', 'sbo', 'b188', 'dafa', 'bfe', 'bf', 'b365', 'x1', 'mara', 'wh', 'bwin', 'unibet', 'b10', 'betway', 'iw', 'avg', 'max'];

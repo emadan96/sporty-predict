@@ -50,7 +50,7 @@ const leagueBy = (code) => state.leagues.find((l) => l.code === code) || state.d
 const leagueIcon = (l) => (l.logo ? `<img class="flag logo" src="${esc(l.logo)}" alt="" loading="lazy">`
   : l.flag ? `<img class="flag" src="https://flagcdn.com/w40/${l.flag}.png" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`
     : l.flagUrl ? `<img class="flag" src="${esc(l.flagUrl)}" alt="" loading="lazy">` : '<span class="flag"></span>');
-const teamLogo = (src) => (src ? `<img class="tlogo" src="${esc(src)}" alt="" loading="lazy">` : '');
+const teamLogo = (src) => (src ? `<img class="tlogo" src="${esc(src)}" alt="" loading="lazy" decoding="async" width="18" height="18">` : '');
 
 const todayRome = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date());
 const addDays = (d, n) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -116,6 +116,10 @@ async function loadList(date, league) {
     const slow = setTimeout(() => { $('#main').innerHTML = '<div class="loading"><span class="spinner"></span>Calcolo pronostici…</div>'; }, 150);
     try { state.data = await fetchDay(date); } finally { clearTimeout(slow); }
   }
+  // Coming back from a match sheet: the same list is already on screen, keep it (and its loaded
+  // logos) instead of rebuilding everything.
+  const key = `${date}|${state.league || ''}`;
+  if (renderList.shownKey === key && renderList.shownData === state.data && $('#main .datebar')) { prefetchAround(date); return; }
   renderSidebar();
   renderList();
   prefetchAround(date);
@@ -267,6 +271,7 @@ function renderList() {
   // Re-rendering must not reset the horizontal scroll of the date strip and the filter pills (mobile).
   const prev = { f: $('#main .filters')?.scrollLeft || 0, d: $('#main .days')?.scrollLeft || 0, date: renderList.lastDate };
   renderList.lastDate = state.date;
+  renderList.shownKey = `${state.date}|${state.league || ''}`; renderList.shownData = state.data;
   const today = todayRome();
 
   $('#main').innerHTML = `

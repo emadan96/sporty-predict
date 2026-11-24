@@ -152,7 +152,7 @@ function renderSidebar() {
 }
 
 const FILTERS = [
-  ['all', 'Tutte'], ['finished', 'Finite'], ['odds', 'Con quote'],
+  ['all', 'Tutte'], ['upcoming', 'In programma'], ['finished', 'Finite'],
 ];
 
 // Kick-off time slots (Rome time). 'next' = not started yet, within the next 3 hours (today only).

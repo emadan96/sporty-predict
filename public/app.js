@@ -157,7 +157,7 @@ function renderSidebar() {
 }
 
 const FILTERS = [
-  ['all', 'Tutte'], ['upcoming', 'In programma'], ['finished', 'Finite'],
+  ['all', 'Tutte'], ['live', 'Live'], ['upcoming', 'In programma'], ['finished', 'Finite'],
 ];
 
 // Kick-off time slots (Rome time). 'next' = not started yet, within the next 3 hours (today only).
@@ -208,6 +208,7 @@ function onPin(e) {
 const STAR = '<svg class="star" viewBox="0 0 24 24" width="13" height="13" aria-label="Campionato principale"><path fill="currentColor" d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>';
 function passStatus(m) {
   switch (state.filter) {
+    case 'live': return m.status === 'LIVE';
     case 'upcoming': return m.status === 'NS';
     case 'finished': return m.status === 'FT';
     case 'odds': return Boolean(m.move?.cur?.x12);
@@ -231,6 +232,8 @@ function renderList() {
   const slotCount = Object.fromEntries(TIME_SLOTS.map(([k]) => [k, 0]));
   for (const l of leagues) for (const m of l.matches) if (passStatus(m)) for (const [k] of TIME_SLOTS) if (passTime(m, k)) slotCount[k]++;
   const isToday = state.date === todayRome();
+  let liveCount = 0;
+  for (const l of leagues) for (const m of l.matches) if (m.status === 'LIVE') liveCount++;
   if (state.time.startsWith('next') && !isToday) state.time = 'all';
   let total = 0, hits = 0, played = 0;
   const byTime = state.time !== 'all'; // time filter: one list in kick-off order
@@ -292,7 +295,7 @@ function renderList() {
         <select data-time aria-label="Orario">${TIME_SLOTS.filter(([k]) => !k.startsWith('next') || isToday).map(([k, v]) => `<option value="${k}" ${state.time === k ? 'selected' : ''}>${v}${k === 'all' ? '' : ` (${slotCount[k]})`}</option>`).join('')}</select>
       </label>
       <button class="chip top-chip ${state.topFirst && !byTime ? 'active' : ''}" data-top ${byTime ? 'disabled title="Con il filtro orario le partite sono in ordine di inizio"' : 'title="Coppe europee, top 5 campionati e grandi tornei per nazionali sempre in alto"'}>${STAR}Top in alto</button>
-      ${FILTERS.map(([k, v]) => `<button class="chip ${state.filter === k ? 'active' : ''}" data-filter="${k}">${v}</button>`).join('')}
+      ${FILTERS.map(([k, v]) => `<button class="chip ${state.filter === k ? 'active' : ''}" data-filter="${k}">${k === 'live' && liveCount ? `<span class="ldot"></span>${v} <b class="num">${liveCount}</b>` : v}</button>`).join('')}
       ${played ? `<span class="chip stat" title="Esito 1X2 più probabile indovinato sulle partite finite mostrate">1X2 centrati <b>${hits}/${played}</b> (${pct(hits / played)})</span>` : ''}
     </div>
     ${total ? blocks : `<div class="empty">Nessuna partita ${state.filter !== 'all' || state.time !== 'all' ? 'con questi filtri' : 'per questa data'}${state.league ? ' in questa competizione' : ''}.<br><br>
@@ -442,8 +445,10 @@ function liveWanted() {
 
 function updateLive() {
   const changed = [];
-  for (const l of state.data?.leagues || []) for (const m of l.matches) if (applyLiveTo(m)) changed.push([m, l]);
-  if (changed.length && renderList.shownData === state.data && $('#main .datebar')) {
+  for (const l of state.data?.leagues || []) for (const m of l.matches) { const was = m.status; if (applyLiveTo(m)) changed.push([m, l, was]); }
+  const moved = changed.some(([m, , was]) => m.status !== was); // kick-off or final whistle: filters and the Live count change
+  if (moved && renderList.shownData === state.data && $('#main .datebar')) renderList();
+  else if (changed.length && renderList.shownData === state.data && $('#main .datebar')) {
     const cols = COLS[state.tf], byTime = state.time !== 'all';
     for (const [m, l] of changed) {
       const el = $(`#main .row[data-id="${CSS.escape(m.id)}"]`);

@@ -35,6 +35,8 @@ export class LiveHub extends DurableObject {
       if (!r.ok) throw new Error(`API-Football ${r.status}`);
       const body = await r.json();
       const err = body.errors && (Array.isArray(body.errors) ? body.errors[0] : Object.values(body.errors)[0]);
+      // The per-minute limit also comes back as HTTP 200 with errors.rateLimit: retry once like a 429.
+      if (err && /too many requests/i.test(JSON.stringify(err)) && attempt < 2) { await new Promise((ok) => setTimeout(ok, 1500)); continue; }
       if (err) throw new Error(`API-Football: ${typeof err === 'string' ? err : JSON.stringify(err)}`);
       return body.response || [];
     }

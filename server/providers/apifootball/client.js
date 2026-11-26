@@ -38,7 +38,9 @@ export class ApiFootball {
   }
 
   async #throttle() {
-    const perMin = env.maxPerMinute || this.quota.minuteLimit || 10;
+    // Leave 15% of the per-minute limit free: the live Worker (worker/index.js) shares the same key and
+    // got 429s while the hourly sync was running at full speed.
+    const perMin = env.maxPerMinute || (this.quota.minuteLimit ? Math.max(2, Math.floor(this.quota.minuteLimit * 0.85)) : 10);
     for (;;) {
       const now = Date.now();
       this.recent = this.recent.filter((t) => now - t < 60_000);

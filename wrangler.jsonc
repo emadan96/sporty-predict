@@ -1,5 +1,6 @@
 // Cloudflare: sito statico (cartella dist/ generata da npm run build) + worker/index.js solo per /api/live.
 // Secret: APIFOOTBALL_KEY (npx wrangler secret put APIFOOTBALL_KEY), resta salvato tra un deploy e l'altro.
+// LiveHub è un Durable Object (piano gratuito, storage SQLite): una sola copia dei dati live per tutti.
 {
   "name": "sporty-predict",
   "main": "worker/index.js",
@@ -8,5 +9,9 @@
     "directory": "dist",
     "binding": "ASSETS",
     "run_worker_first": ["/api/live"]
-  }
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "LIVE", "class_name": "LiveHub" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveHub"] }]
 }

@@ -398,7 +398,7 @@ function rowHtml(m, cols, league = null) {
 const LIVE_ST = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'LIVE', 'INT', 'SUSP']);
 const FIN_ST = new Set(['FT', 'AET', 'PEN']);
 const LIVE_EVERY = 60_000;
-const live = { map: new Map(), at: 0, busy: false };
+const live = { map: new Map(), at: 0, t: 0, busy: false }; // at: when we asked, t: when the server fetched it
 
 function liveClock(lv, long = false) {
   if (!lv) return 'Live';
@@ -408,8 +408,19 @@ function liveClock(lv, long = false) {
     case 'P': return long ? 'Calci di rigore' : 'Rigori';
     case 'INT': return 'Interrotta';
     case 'SUSP': return 'Sospesa';
-    default: return lv.min != null ? `${lv.min}${lv.x ? `+${lv.x}` : ''}'` : 'Live';
+    default: return lv.min != null ? (lv.over ? `${lv.min}+'` : `${lv.min}${lv.x ? `+${lv.x}` : ''}'`) : 'Live';
   }
+}
+
+// The clock keeps running between two answers: minute given by the provider + minutes passed since it was fetched,
+// stopped at the end of the period (shown as 45+', 90+', 120+').
+const PERIOD_END = { '1H': 45, '2H': 90, ET: 120 };
+function tickMinute(r) {
+  const end = PERIOD_END[r.st];
+  if (r.min == null || !end) return { min: r.min, x: r.x || null };
+  const min = r.min + Math.max(0, Math.floor((Date.now() - (live.t || Date.now())) / 60_000));
+  if (r.x || min > end) return { min: Math.max(end, r.min), x: r.min >= end ? r.x || null : null, over: min > end && !r.x };
+  return { min, x: null };
 }
 
 /** Merges the live answer into a match object (list row or match sheet). True when something visible changed. */
@@ -421,7 +432,7 @@ function applyLiveTo(m) {
     if (m.status === 'FT') return false;
     Object.assign(m, { status: 'FT', ft: r.ft || r.g, ht: r.ht || m.ht || null, afterExtra: r.st !== 'FT' ? r.g : null, statusText: r.st !== 'FT' ? r.st : null, live: null });
   } else if (LIVE_ST.has(r.st)) {
-    Object.assign(m, { status: 'LIVE', statusText: null, live: { st: r.st, min: r.min, x: r.x || null, g: r.g }, liveHt: r.ht || null });
+    Object.assign(m, { status: 'LIVE', statusText: null, live: { st: r.st, ...tickMinute(r), g: r.g }, liveHt: r.ht || null });
   } else return false;
   if (r.ev?.length) m.events = r.ev;
   m.rc = r.rc || null;
@@ -479,7 +490,7 @@ async function pollLive() {
   try {
     const r = await api('/api/live');
     live.map = new Map((r.matches || []).map((x) => [x.id, x]));
-    live.at = Date.now();
+    live.at = Date.now(); live.t = r.t || live.at;
     updateLive();
   } catch { /* offline or key missing: the hourly data stays on screen */ } finally { live.busy = false; }
 }

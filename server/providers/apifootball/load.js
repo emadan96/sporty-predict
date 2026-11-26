@@ -5,9 +5,7 @@ import { AF_DIR } from './client.js';
 import { AF_TO_FD, FEATURED, category, countryIt, isNationalCompetition } from './leagues.js';
 import { snapshot } from './odds.js';
 import { matchTeams } from './teams.js';
-
-const FINISHED = new Set(['FT', 'AET', 'PEN']);
-const LIVE = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'LIVE', 'INT', 'SUSP']);
+import { FINISHED, LIVE, redCards } from './events.js';
 const STATUS_IT = { PST: 'Rinviata', CANC: 'Cancellata', ABD: 'Sospesa', AWD: 'A tavolino', WO: 'Walkover', TBD: 'Da definire' };
 
 async function readJson(file, fallback) {
@@ -38,6 +36,11 @@ export async function loadApiFootball(fdTeamsByCode) {
   const raw = new Map(); // fixture id -> raw fixture (latest wins)
   for (const f of await list(path.join(AF_DIR, 'history'))) for (const x of await readJson(path.join(AF_DIR, 'history', f), [])) raw.set(x.fixture.id, x);
   for (const f of await list(path.join(AF_DIR, 'fixtures'))) for (const x of await readJson(path.join(AF_DIR, 'fixtures', f), [])) raw.set(x.fixture.id, x);
+
+  const details = new Map(); // fixture id -> { t, st, ev, stats }
+  for (const f of await list(path.join(AF_DIR, 'details'))) {
+    for (const [id, v] of Object.entries(await readJson(path.join(AF_DIR, 'details', f), {}))) details.set(Number(id), v);
+  }
 
   const odds = new Map();
   for (const f of await list(path.join(AF_DIR, 'odds'))) {
@@ -102,6 +105,8 @@ export async function loadApiFootball(fdTeamsByCode) {
     const ftScore = x.score?.fulltime, htScore = x.score?.halftime;
     const finished = FINISHED.has(short) && ftScore?.home != null;
     const o = odds.get(x.fixture.id);
+    const det = details.get(x.fixture.id);
+    const isLive = !finished && LIVE.has(short);
     matches.push({
       id: meta.tier === 'fd' ? `${meta.code}-${ko.date.replace(/-/g, '')}-${slug(home)}-${slug(away)}` : `af${x.fixture.id}`,
       afId: x.fixture.id, league: meta.code, date: ko.date, time: ko.time, ts: ko.ts,
@@ -113,7 +118,10 @@ export async function loadApiFootball(fdTeamsByCode) {
       ft: finished ? [ftScore.home, ftScore.away] : null,
       ht: finished && htScore?.home != null ? [htScore.home, htScore.away] : null,
       afterExtra: finished && short !== 'FT' ? [x.goals.home, x.goals.away] : null,
-      xg: null, stats: null,
+      // Score and minute at the time of the last sync (the live Worker refreshes them every minute).
+      live: isLive ? { st: short, min: x.fixture.status?.elapsed ?? null, g: [x.goals.home ?? 0, x.goals.away ?? 0] } : null,
+      events: det?.ev?.length ? det.ev : null, rc: redCards(det?.ev),
+      xg: null, stats: det?.stats || null,
       odds: o?.last?.o || null,
       oddsOpen: o?.first ? { t: o.first.t, ...snapshot(o.first.o) } : null,
       oddsUpdated: o?.last?.t || null,

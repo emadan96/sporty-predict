@@ -10,6 +10,8 @@ import { Predictor } from './model/predict.js';
 import { createApi } from './api.js';
 import { ingest } from './ingest.js';
 import { syncApiFootball } from './providers/apifootball/sync.js';
+import { ApiFootball } from './providers/apifootball/client.js';
+import { liveRow } from './providers/apifootball/events.js';
 
 const store = new Store();
 const predictor = new Predictor(store);
@@ -79,6 +81,13 @@ const routes = {
   'GET /api/match': (q) => api.match(q.get('id')) || { status: 404, body: { error: 'Partita non trovata' } },
 
   'GET /api/search': (q) => api.search(q.get('q')),
+
+  // Same answer as worker/index.js online (without the "just finished" memory): cached 60 s on disk.
+  'GET /api/live': async () => {
+    if (!env.apiKey) return { status: 503, body: { error: 'APIFOOTBALL_KEY non impostata' } };
+    const body = await new ApiFootball().get('fixtures', { live: 'all', timezone: 'Europe/Rome' }, { ttlHours: 1 / 60 });
+    return { t: Date.now(), matches: (body.response || []).map(liveRow) };
+  },
 
   'POST /api/refresh': async () => {
     const fd = await refresh();

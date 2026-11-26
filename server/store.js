@@ -172,9 +172,10 @@ function mergeAf(fd, af) {
     afId: af.afId, homeName: af.homeName, awayName: af.awayName, homeLogo: af.homeLogo, awayLogo: af.awayLogo,
     homeTeamId: af.homeTeamId, awayTeamId: af.awayTeamId, round: af.round, venue: af.venue, referee: fd.referee || af.referee,
     oddsOpen: af.oddsOpen || fd.oddsOpen, oddsUpdated: af.oddsUpdated, source: 'fd+af',
+    events: af.events || null, rc: af.rc || null, stats: fd.stats || af.stats || null,
   };
   if (fd.status !== 'FT') {
-    Object.assign(out, { status: af.status, statusText: af.statusText, ft: af.ft, ht: af.ht, time: af.time, ts: af.ts });
+    Object.assign(out, { status: af.status, statusText: af.statusText, ft: af.ft, ht: af.ht, time: af.time, ts: af.ts, live: af.live || null });
   }
   if (af.odds) {
     const o = { ...(fd.odds || {}), ...af.odds };

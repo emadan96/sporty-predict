@@ -156,3 +156,33 @@ test('end to end: API fixtures merge with football-data and every competition ge
   }
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test('events: compact timeline, red cards, live row', async () => {
+  const { compactEvents, redCards, liveRow, compactStats } = await import('../server/providers/apifootball/events.js');
+  const H = 10, A = 20;
+  const raw = [
+    { time: { elapsed: 12 }, team: { id: H }, player: { name: 'Rossi' }, assist: { name: 'Bianchi' }, type: 'Goal', detail: 'Normal Goal' },
+    { time: { elapsed: 30 }, team: { id: A }, player: { name: 'Verdi' }, type: 'Card', detail: 'Yellow Card' },
+    { time: { elapsed: 45, extra: 2 }, team: { id: A }, player: { name: 'Verdi' }, type: 'Card', detail: 'Second Yellow card' },
+    { time: { elapsed: 60 }, team: { id: H }, player: { name: 'Neri' }, type: 'Goal', detail: 'Penalty' },
+    { time: { elapsed: 70 }, team: { id: A }, player: { name: 'Gialli' }, type: 'Goal', detail: 'Missed Penalty' },
+    { time: { elapsed: 75 }, team: { id: H }, player: { name: 'Neri' }, type: 'Var', detail: 'Goal cancelled' },
+    { time: { elapsed: 120 }, team: { id: H }, player: { name: 'Rossi' }, type: 'Goal', detail: 'Penalty', comments: 'Penalty Shootout' },
+  ];
+  const ev = compactEvents(raw, H);
+  assert.deepEqual(ev.map((e) => e.k), ['goal', 'yc', 'y2', 'pen', 'mpen', 'var']); // shoot-out kick left out
+  assert.deepEqual(ev[0], { m: 12, s: 'h', k: 'goal', p: 'Rossi', a: 'Bianchi' });
+  assert.equal(ev[2].x, 2);
+  assert.deepEqual(redCards(ev), [0, 1]);
+  assert.equal(redCards([]), null);
+
+  const row = liveRow({ fixture: { id: 5, status: { short: 'AET', elapsed: 120 } }, teams: { home: { id: H }, away: { id: A } },
+    goals: { home: 2, away: 1 }, score: { halftime: { home: 1, away: 0 }, fulltime: { home: 1, away: 1 } }, events: raw });
+  assert.deepEqual([row.st, row.g, row.ht, row.ft, row.rc], ['AET', [2, 1], [1, 0], [1, 1], [0, 1]]);
+
+  const st = compactStats([
+    { team: { id: A }, statistics: [{ type: 'Ball Possession', value: '45%' }, { type: 'Corner Kicks', value: null }] },
+    { team: { id: H }, statistics: [{ type: 'Ball Possession', value: '55%' }, { type: 'Corner Kicks', value: 6 }] },
+  ], H);
+  assert.deepEqual(st, { poss: [55, 45], corners: [6, 0] });
+});

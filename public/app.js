@@ -26,7 +26,7 @@ async function staticSearch(term) {
 }
 const api = async (url, opts) => {
   if (STATIC && url.startsWith('/api/search?')) return staticSearch(new URL(url, 'http://x').searchParams.get('q') || '');
-  const r = await fetch(STATIC ? staticUrl(url) : url, opts);
+  const r = await fetch(STATIC && !url.startsWith('/api/live') ? staticUrl(url) : url, opts);
   if (!r.ok) {
     if (STATIC && r.status === 404) {
       if (url.startsWith('/api/matches')) return { date: new URL(url, 'http://x').searchParams.get('date'), leagues: [] };
@@ -119,10 +119,11 @@ async function loadList(date, league) {
   // Coming back from a match sheet: the same list is already on screen, keep it (and its loaded
   // logos) instead of rebuilding everything.
   const key = `${date}|${state.league || ''}`;
-  if (renderList.shownKey === key && renderList.shownData === state.data && $('#main .datebar')) { prefetchAround(date); return; }
+  if (renderList.shownKey === key && renderList.shownData === state.data && $('#main .datebar')) { prefetchAround(date); pollLive(); return; }
   renderSidebar();
   renderList();
   prefetchAround(date);
+  pollLive();
 }
 
 const CATS = ['Coppe internazionali', 'Nazionali', 'Campionati', 'Coppe nazionali'];
@@ -367,21 +368,158 @@ function rowHtml(m, cols, league = null) {
     pc += p.index ? `<div class="pc idx" data-l="Indice ${pct(p.index.score)}" title="Mercato più solido: modello ${pct(p.index.model)}${p.index.archive != null ? ` · archivio ${pct(p.index.archive)} su ${p.index.n}` : ''}">
       <b>${esc(p.index.label)}</b><small class="idx-p">${pct(p.index.score)}</small></div>` : '<div class="pc idx"></div>';
   }
+  const lv = !fin && m.status === 'LIVE' ? m.live : null;
   const timeCell = fin ? `<div class="time ft">Finale${m.afterExtra ? `<br><small>${m.statusText === 'PEN' ? 'rigori' : 'd.t.s.'}</small>` : ''}</div>`
     : m.statusText ? `<div class="time off">${esc(m.statusText)}</div>`
-      : m.status === 'LIVE' ? '<div class="time live">Live</div>' : `<div class="time">${esc(m.time)}</div>`;
+      : m.status === 'LIVE' ? `<div class="time live"><span class="ldot"></span>${esc(liveClock(lv))}</div>` : `<div class="time">${esc(m.time)}</div>`;
+  const sc = fin ? m.ft : lv?.g;
+  const rc = (i) => (m.rc?.[i] ? `<i class="rcard" title="${m.rc[i] > 1 ? `${m.rc[i]} espulsioni` : 'Espulsione'}">${m.rc[i] > 1 ? m.rc[i] : ''}</i>` : '');
   return `
     <div class="row ${league && (isMajor(league.code) || isFav(league.code)) ? 'major' : ''}" data-id="${esc(m.id)}">
       ${timeCell}
       <div class="teams">
         ${league ? `<div class="tl">${leagueIcon(league)}<span>${esc(league.country)} · ${esc(league.name)}</span>${isMajor(league.code) ? STAR : ''}${isFav(league.code) ? `<i class="pin-mark">${PIN}</i>` : ''}</div>` : ''}
-        <div class="t ${winH ? 'win' : ''}">${teamLogo(m.homeLogo)}<span>${esc(m.home)}</span>${p?.hasValue && !fin ? '<span class="badge value">VALUE</span>' : ''}</div>
-        <div class="s num">${fin ? m.ft[0] : ''}${fin && m.ht ? `<span class="htsc">(${m.ht[0]})</span>` : ''}</div>
-        <div class="t ${winA ? 'win' : ''}">${teamLogo(m.awayLogo)}<span>${esc(m.away)}</span></div>
-        <div class="s num">${fin ? m.ft[1] : ''}${fin && m.ht ? `<span class="htsc">(${m.ht[1]})</span>` : ''}</div>
+        <div class="t ${winH ? 'win' : ''}">${teamLogo(m.homeLogo)}<span>${esc(m.home)}</span>${rc(0)}${p?.hasValue && !fin && !lv ? '<span class="badge value">VALUE</span>' : ''}</div>
+        <div class="s num ${lv ? 'live' : ''}">${sc ? sc[0] ?? '' : ''}${fin && m.ht ? `<span class="htsc">(${m.ht[0]})</span>` : ''}</div>
+        <div class="t ${winA ? 'win' : ''}">${teamLogo(m.awayLogo)}<span>${esc(m.away)}</span>${rc(1)}</div>
+        <div class="s num ${lv ? 'live' : ''}">${sc ? sc[1] ?? '' : ''}${fin && m.ht ? `<span class="htsc">(${m.ht[1]})</span>` : ''}</div>
       </div>
       <div class="rcols num">${oddsCells(m.move)}${pc}</div>
     </div>`;
+}
+
+// ---------------------------------------------------------------- live (risultati, minuto, eventi)
+// /api/live (worker/index.js online, server/index.js in locale) answers with the matches in progress, cached
+// 60 s at the edge. The browser asks only while the page is visible and a match of the shown day is live or
+// about to start; the answer is merged into the matches already on screen and only those rows are redrawn.
+const LIVE_ST = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'LIVE', 'INT', 'SUSP']);
+const FIN_ST = new Set(['FT', 'AET', 'PEN']);
+const LIVE_EVERY = 60_000;
+const live = { map: new Map(), at: 0, busy: false };
+
+function liveClock(lv, long = false) {
+  if (!lv) return 'Live';
+  switch (lv.st) {
+    case 'HT': return long ? 'Intervallo' : 'Int.';
+    case 'BT': return long ? 'Pausa prima dei supplementari' : 'Pausa';
+    case 'P': return long ? 'Calci di rigore' : 'Rigori';
+    case 'INT': return 'Interrotta';
+    case 'SUSP': return 'Sospesa';
+    default: return lv.min != null ? `${lv.min}${lv.x ? `+${lv.x}` : ''}'` : 'Live';
+  }
+}
+
+/** Merges the live answer into a match object (list row or match sheet). True when something visible changed. */
+function applyLiveTo(m) {
+  const r = m?.afId && live.map.get(m.afId);
+  if (!r) return false;
+  const before = JSON.stringify([m.status, m.live, m.ft, m.rc, m.events?.length]);
+  if (FIN_ST.has(r.st)) {
+    if (m.status === 'FT') return false;
+    Object.assign(m, { status: 'FT', ft: r.ft || r.g, ht: r.ht || m.ht || null, afterExtra: r.st !== 'FT' ? r.g : null, statusText: r.st !== 'FT' ? r.st : null, live: null });
+  } else if (LIVE_ST.has(r.st)) {
+    Object.assign(m, { status: 'LIVE', statusText: null, live: { st: r.st, min: r.min, x: r.x || null, g: r.g }, liveHt: r.ht || null });
+  } else return false;
+  if (r.ev?.length) m.events = r.ev;
+  m.rc = r.rc || null;
+  return before !== JSON.stringify([m.status, m.live, m.ft, m.rc, m.events?.length]);
+}
+
+/** Worth asking: a match on screen is live, or starts within 5 minutes / started less than 2½ hours ago. */
+function liveWanted() {
+  const today = todayRome(), now = nowRomeMin();
+  const near = (m) => {
+    if (!m?.afId) return false;
+    if (m.status === 'LIVE') return true;
+    if (m.status !== 'NS' || m.date !== today || !m.time) return false;
+    const [h, mm] = m.time.split(':').map(Number);
+    const t = h * 60 + mm;
+    return t <= now + 5 && t >= now - 150;
+  };
+  if (near(state.detail?.match) && !$('#detail').hidden) return true;
+  return Boolean(state.data?.leagues?.some((l) => l.matches.some(near)));
+}
+
+function updateLive() {
+  const changed = [];
+  for (const l of state.data?.leagues || []) for (const m of l.matches) if (applyLiveTo(m)) changed.push([m, l]);
+  if (changed.length && renderList.shownData === state.data && $('#main .datebar')) {
+    const cols = COLS[state.tf], byTime = state.time !== 'all';
+    for (const [m, l] of changed) {
+      const el = $(`#main .row[data-id="${CSS.escape(m.id)}"]`);
+      if (!el) continue;
+      const t = document.createElement('div');
+      t.innerHTML = rowHtml(m, cols, byTime ? l : null);
+      const row = t.firstElementChild;
+      row.addEventListener('click', () => { location.hash = `#/m/${encodeURIComponent(m.id)}`; });
+      el.replaceWith(row);
+    }
+  }
+  const d = state.detail?.match;
+  if (d && applyLiveTo(d) && !$('#detail').hidden) {
+    const mid = $('#detail .sb-mid');
+    if (mid) mid.innerHTML = sbMid(d, state.detail.prediction);
+    if (state.tab === 'over') {
+      const card = $('#ev-card'), html = eventsCard(d);
+      if (card) card.outerHTML = html;
+      else if (html) $('#detail .d-body .cards')?.insertAdjacentHTML('afterbegin', html);
+    }
+  }
+}
+
+async function pollLive() {
+  if (live.busy || document.hidden || !liveWanted()) return;
+  if (Date.now() - live.at < LIVE_EVERY - 5000) { updateLive(); return; } // fresh enough: just apply it
+  live.busy = true;
+  try {
+    const r = await api('/api/live');
+    live.map = new Map((r.matches || []).map((x) => [x.id, x]));
+    live.at = Date.now();
+    updateLive();
+  } catch { /* offline or key missing: the hourly data stays on screen */ } finally { live.busy = false; }
+}
+setInterval(pollLive, LIVE_EVERY);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollLive(); });
+
+const VAR_IT = { 'Goal cancelled': 'Gol annullato', 'Goal Disallowed - offside': 'Gol annullato (fuorigioco)', 'Goal Disallowed': 'Gol annullato',
+  'Goal confirmed': 'Gol convalidato', 'Penalty confirmed': 'Rigore confermato', 'Penalty cancelled': 'Rigore revocato', 'Card upgrade': 'Cartellino cambiato',
+  'Red card cancelled': 'Rosso revocato' };
+const EV_ICON = {
+  goal: '<i class="ev-ico ball" title="Gol">⚽</i>', pen: '<i class="ev-ico ball" title="Gol su rigore">⚽</i>', og: '<i class="ev-ico ball og" title="Autogol">⚽</i>',
+  mpen: '<i class="ev-ico miss" title="Rigore sbagliato">✕</i>', yc: '<i class="ev-card y" title="Ammonizione"></i>', rc: '<i class="ev-card r" title="Espulsione"></i>',
+  y2: '<i class="ev-card y2" title="Seconda ammonizione"></i>', sub: '<i class="ev-ico sub" title="Sostituzione">⇄</i>', var: '<i class="ev-ico var">VAR</i>',
+};
+function evText(e) {
+  const p = esc(e.p || '');
+  switch (e.k) {
+    case 'goal': return `<b>${p}</b>${e.a ? ` <small>assist ${esc(e.a)}</small>` : ''}`;
+    case 'pen': return `<b>${p}</b> <small>rigore</small>`;
+    case 'og': return `<b>${p}</b> <small>autogol</small>`;
+    case 'mpen': return `${p} <small>rigore sbagliato</small>`;
+    case 'y2': return `${p} <small>doppia ammonizione</small>`;
+    // API-Football: assist = player coming on, player = player going off.
+    case 'sub': return e.a ? `${esc(e.a)} <small>per ${p}</small>` : p;
+    case 'var': return `<small>${esc(VAR_IT[e.d] || e.d || 'Revisione VAR')}</small>${p ? ` ${p}` : ''}`;
+    default: return p;
+  }
+}
+/** Match timeline: home events on the left, away on the right, with half-time and extra-time dividers. */
+function eventsCard(m) {
+  const evs = [...(m.events || [])].sort((a, b) => (a.m ?? 0) - (b.m ?? 0) || (a.x ?? 0) - (b.x ?? 0));
+  if (!evs.length) return '';
+  const ht = m.ht || m.liveHt;
+  const rows = [];
+  let pastHt = false, pastEt = false;
+  for (const e of evs) {
+    if (!pastHt && e.m > 45) { pastHt = true; rows.push(`<div class="ev-div">Intervallo${ht ? ` · ${ht[0]}-${ht[1]}` : ''}</div>`); }
+    if (!pastEt && e.m > 90) { pastEt = true; rows.push('<div class="ev-div">Supplementari</div>'); }
+    const side = `<span class="ev-txt">${EV_ICON[e.k] || ''}<span>${evText(e)}</span></span>`;
+    rows.push(`<div class="ev ${e.s}"><span class="ev-side">${e.s === 'h' ? side : ''}</span><span class="ev-min num">${e.m ?? ''}${e.x ? `+${e.x}` : ''}'</span><span class="ev-side">${e.s === 'a' ? side : ''}</span></div>`);
+  }
+  const lv = m.status === 'LIVE' ? m.live : null;
+  return `<div class="card wide" id="ev-card"><h3>Cronaca${lv ? ' <span class="live-tag"><span class="ldot"></span>live</span>' : ''}</h3>
+    <div class="ev-head"><span>${esc(m.home)}</span><span></span><span>${esc(m.away)}</span></div>
+    <div class="ev-list">${rows.join('')}</div></div>`;
 }
 
 // ---------------------------------------------------------------- detail view
@@ -394,7 +532,9 @@ async function openDetail(id) {
     try { state.detail = await api(`/api/match?id=${encodeURIComponent(id)}`); } catch (e) { panel.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
     state.tab = 'over'; state.sub = { pred: 'ft', odds: 'book' };
   }
+  applyLiveTo(state.detail.match);
   renderDetail();
+  pollLive();
 }
 
 function closeDetail(navigate = true) {
@@ -415,6 +555,15 @@ const initials = (n) => n.split(/\s+/).filter((w) => w.length > 1).slice(0, 2).m
 const crest = (name, logo) => (logo ? `<div class="crest img"><img src="${esc(logo)}" alt=""></div>`
   : `<div class="crest" style="background:${crestColor(name)}">${esc(initials(name))}</div>`);
 
+function sbMid(m, p) {
+  const fin = m.status === 'FT';
+  const lv = !fin && m.status === 'LIVE' ? m.live : null;
+  return `${fin ? `<div class="big num">${m.ft[0]} - ${m.ft[1]}</div><div class="sub">Finale${m.ht ? ` · PT ${m.ht[0]}-${m.ht[1]}` : ''}${m.afterExtra ? ` · dopo supplementari ${m.afterExtra.join('-')}` : ''}</div>`
+    : lv ? `<div class="big num live">${lv.g[0]} - ${lv.g[1]}</div><div class="sub live-sub"><span class="ldot"></span>${esc(liveClock(lv, true))}${m.liveHt && lv.st !== '1H' ? ` · PT ${m.liveHt[0]}-${m.liveHt[1]}` : ''}</div>`
+      : `<div class="when num">${esc(m.statusText || m.time)}</div><div class="sub">${fmtDateLong(m.date)}${m.venue ? ` · ${esc(m.venue)}` : ''}</div>`}
+    <div class="sub" style="margin-top:6px">Esatto più probabile <b class="acc2">${p.expected.ft.score}</b> · PT <b class="acc2">${p.expected.ht.score}</b></div>`;
+}
+
 function renderDetail({ tabChanged = false } = {}) {
   const { match: m, league: l, prediction: p } = state.detail;
   const panel = $('#detail');
@@ -429,11 +578,7 @@ function renderDetail({ tabChanged = false } = {}) {
         <button class="d-close" aria-label="Chiudi">✕</button></div>
       <div class="scoreboard">
         <div class="sb-team">${crest(m.home, m.homeLogo)}<div class="name">${esc(m.home)}</div></div>
-        <div class="sb-mid">
-          ${fin ? `<div class="big num">${m.ft[0]} - ${m.ft[1]}</div><div class="sub">Finale${m.ht ? ` · PT ${m.ht[0]}-${m.ht[1]}` : ''}${m.afterExtra ? ` · dopo supplementari ${m.afterExtra.join('-')}` : ''}</div>`
-    : `<div class="when num">${esc(m.statusText || m.time)}</div><div class="sub">${fmtDateLong(m.date)}${m.venue ? ` · ${esc(m.venue)}` : ''}</div>`}
-          <div class="sub" style="margin-top:6px">Esatto più probabile <b class="acc2">${p.expected.ft.score}</b> · PT <b class="acc2">${p.expected.ht.score}</b></div>
-        </div>
+        <div class="sb-mid">${sbMid(m, p)}</div>
         <div class="sb-team">${crest(m.away, m.awayLogo)}<div class="name">${esc(m.away)}</div></div>
       </div>
       <div class="xgline">Goal attesi <b class="num">${fx(p.expected.xg[0])} – ${fx(p.expected.xg[1])}</b> · 1° tempo <b class="num">${fx(p.expected.xgHt[0])} – ${fx(p.expected.xgHt[1])}</b>
@@ -626,6 +771,7 @@ const TAB_RENDER = {
     const upd = move.updated ? new Date(move.updated).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
     return `
       <div class="cards">
+        ${eventsCard(m)}
         <div class="card wide verdict"><h3>Il pronostico</h3><p>${verdict(p, m)}</p></div>
         <div class="card wide"><h3>Esito finale 1X2</h3>${tri(p.ft.x12, ['1 · ' + m.home, 'X · Pareggio', '2 · ' + m.away], refX12())}</div>
         ${idx.length ? `<div class="card wide"><h3>Mercati più solidi</h3><div class="idx-cards">
@@ -869,8 +1015,8 @@ const TAB_RENDER = {
     : '<div class="note">Nessun precedente negli archivi.</div>'}
         </div>
         ${m.stats ? `<div class="card wide"><h3>Statistiche partita</h3><div class="kv">
-          ${Object.entries({ shots: 'Tiri', sot: 'Tiri in porta', corners: 'Calci d\'angolo', yellow: 'Ammonizioni', red: 'Espulsioni' })
-      .filter(([k]) => m.stats[k]).map(([k, n]) => `<span class="k">${n}</span><span class="num">${m.stats[k][0]} – ${m.stats[k][1]}</span>`).join('')}
+          ${Object.entries({ poss: 'Possesso palla', shots: 'Tiri', sot: 'Tiri in porta', corners: 'Calci d\'angolo', fouls: 'Falli', yellow: 'Ammonizioni', red: 'Espulsioni' })
+      .filter(([k]) => m.stats[k]).map(([k, n]) => { const u = k === 'poss' ? '%' : ''; return `<span class="k">${n}</span><span class="num">${m.stats[k][0]}${u} – ${m.stats[k][1]}${u}</span>`; }).join('')}
         </div></div>` : ''}
       </div>`;
   },

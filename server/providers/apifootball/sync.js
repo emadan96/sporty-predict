@@ -4,6 +4,7 @@
 //   fixtures/<YYYY-MM-DD>.json       all fixtures of a day (every competition)
 //   odds/<YYYY-MM-DD>.json           { fixtureId: { first:{t,o}, last:{t,o} } } parsed odds snapshots
 //   history/<leagueId>_<season>.json all fixtures of a league season (for team ratings)
+//   details/<YYYY-MM-DD>.json        { fixtureId: { t, st, ev, stats } } match events + statistics (events.js)
 //   plan.json                        what the subscription allows (learned from /status and plan errors)
 //   status.json                      last run summary + quota
 //
@@ -13,6 +14,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ApiFootball, AF_DIR, QuotaError, PlanError } from './client.js';
 import { parseOdds } from './odds.js';
+import { FINISHED, LIVE, liveRow, compactStats } from './events.js';
 import { env } from '../../env.js';
 import { AF_TO_FD, FEATURED, isNationalCompetition } from './leagues.js';
 
@@ -48,6 +50,68 @@ async function readJson(file, fallback) {
 async function writeJson(file, data) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(data));
+}
+
+const DETAILS_BATCH = 20; // provider maximum for fixtures?ids=
+const DETAILS_MAX_CALLS = Number(process.env.APIFOOTBALL_DETAILS_MAX_CALLS || 150); // per run (first run catches up on past days)
+
+/** Leagues whose current season has events coverage (unknown leagues count as covered). */
+async function eventsCoverage() {
+  const cat = await readJson(path.join(AF_DIR, 'leagues.json'), []);
+  const no = new Set();
+  for (const x of cat) {
+    const cur = x.seasons?.find((s) => s.current) || x.seasons?.at(-1);
+    if (cur?.coverage?.fixtures && !cur.coverage.fixtures.events) no.add(x.league.id);
+  }
+  return (id) => !no.has(id);
+}
+
+/**
+ * details/<YYYY-MM-DD>.json  { fixtureId: { t, st, ev, stats } }
+ * A finished match is fetched once (and once more if it was stored while still live); live matches every run.
+ */
+export async function syncDetails(api, days, summary, log) {
+  const covered = await eventsCoverage();
+  const want = []; // { f, d }
+  const stores = new Map();
+  for (const d of days) {
+    const file = path.join(AF_DIR, 'details', `${d}.json`);
+    const store = await readJson(file, {});
+    stores.set(d, { file, store, dirty: false });
+    for (const f of await readJson(path.join(AF_DIR, 'fixtures', `${d}.json`), [])) {
+      const st = f.fixture.status?.short;
+      if (!covered(f.league.id)) continue;
+      const have = store[f.fixture.id];
+      if (LIVE.has(st) || (FINISHED.has(st) && !(have && FINISHED.has(have.st)))) want.push({ f, d });
+    }
+  }
+  // Live first, then the most important competitions.
+  want.sort((a, b) => Number(FINISHED.has(a.f.fixture.status.short)) - Number(FINISHED.has(b.f.fixture.status.short))
+    || leaguePriority(a.f.league) - leaguePriority(b.f.league));
+  const dayOf = new Map(want.map(({ f, d }) => [f.fixture.id, d]));
+  let calls = 0;
+  for (let i = 0; i < want.length; i += DETAILS_BATCH) {
+    if (calls >= DETAILS_MAX_CALLS) { summary.skipped.push(`eventi: ${want.length - i} partite rimandate alla prossima run`); break; }
+    if (api.budgetLeft() <= 100) { summary.skipped.push(`eventi: ${want.length - i} partite (quota bassa)`); break; }
+    const ids = want.slice(i, i + DETAILS_BATCH).map(({ f }) => f.fixture.id);
+    let body;
+    try { body = await api.get('fixtures', { ids: ids.join('-'), timezone: 'Europe/Rome' }, { cache: false }); } catch (e) {
+      if (e instanceof QuotaError) { summary.skipped.push('eventi (quota)'); break; }
+      summary.errors.push(`eventi: ${e.message}`); break;
+    }
+    calls++;
+    const t = Date.now();
+    for (const x of body.response || []) {
+      const s = stores.get(dayOf.get(x.fixture.id));
+      if (!s) continue;
+      const row = liveRow(x);
+      s.store[x.fixture.id] = { t, st: row.st, ev: row.ev, stats: compactStats(x.statistics, x.teams?.home?.id) };
+      s.dirty = true;
+      summary.details++;
+    }
+  }
+  for (const s of stores.values()) if (s.dirty) await writeJson(s.file, s.store);
+  if (want.length) log(`[api-football] eventi: ${summary.details} partite aggiornate (${want.length} da aggiornare) con ${calls} chiamate`);
 }
 
 const romeToday = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date());
@@ -97,7 +161,7 @@ async function run({ log = console.log, force = false } = {}) {
 
   const summary = {
     enabled: true, plan: plan.name || null, startedAt: new Date().toISOString(),
-    fixturesDays: 0, oddsDays: 0, oddsFixtures: 0, histories: 0, skipped: [], errors: [],
+    fixturesDays: 0, details: 0, oddsDays: 0, oddsFixtures: 0, histories: 0, skipped: [], errors: [],
   };
   const due = async (file, ttlH) => force || (await ageHours(file)) >= ttlH;
   const guard = async (label, fn) => {
@@ -138,6 +202,9 @@ async function run({ log = console.log, force = false } = {}) {
     });
     if (r === 'quota') break;
   }
+
+  // 2b) events + statistics (fixtures?ids=, 20 per call): finished matches once, live ones at every run.
+  if (!free) await syncDetails(api, days.filter((d) => d <= today && dayAllowed(d)), summary, log);
 
   // 3) odds snapshots. Today/tomorrow first (provider refreshes every 3h; on Free every 12h to fit the quota).
   const tried = new Set(); // fixtures already requested in this run (some have no odds yet: never ask twice)
@@ -246,7 +313,7 @@ async function run({ log = console.log, force = false } = {}) {
   summary.quota = api.quota;
   summary.planLimits = { dayFrom: plan.dayFrom ?? null, dayTo: plan.dayTo ?? null, seasonMin: plan.seasonMin ?? null, seasonMax: plan.seasonMax ?? null };
   await writeJson(path.join(AF_DIR, 'status.json'), summary);
-  log(`[api-football] piano ${plan.name || '?'} · giorni fixture ${summary.fixturesDays}, giorni quote ${summary.oddsDays} (${summary.oddsFixtures} partite), storici ${summary.histories}, chiamate ${api.quota.calls}, rimanenti oggi ${api.quota.dayRemaining ?? '?'}`);
+  log(`[api-football] piano ${plan.name || '?'} · giorni fixture ${summary.fixturesDays}, eventi ${summary.details}, giorni quote ${summary.oddsDays} (${summary.oddsFixtures} partite), storici ${summary.histories}, chiamate ${api.quota.calls}, rimanenti oggi ${api.quota.dayRemaining ?? '?'}`);
   for (const e of summary.errors.slice(0, 5)) log(`  ! ${e}`);
   if (summary.skipped.length) log(`  saltati: ${summary.skipped.slice(0, 6).join(', ')}`);
   return summary;

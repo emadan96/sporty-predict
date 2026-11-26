@@ -4,7 +4,7 @@
 name: Pubblica pronostici
 
 on:
-  # Gli orari (9:17, 13:17, 17:17, 21:17) li dà il cron di Cloudflare in cron/: avvia questo workflow
+  # Gli orari (ogni ora al minuto 17) li dà il cron di Cloudflare in cron/: avvia questo workflow
   # tramite workflow_dispatch, perché i lanci programmati di GitHub arrivano in ritardo o saltano.
   workflow_dispatch:       # pulsante "Run workflow" per aggiornare a mano
   push:

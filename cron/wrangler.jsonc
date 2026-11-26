@@ -1,11 +1,12 @@
-// Cron che avvia l'aggiornamento su GitHub alle 9:17, 13:17, 17:17, 21:17 ora italiana
-// (orari in UTC: con l'ora legale scattano un'ora dopo). Pubblicazione: npx wrangler deploy -c cron/wrangler.jsonc
+// Cron che avvia l'aggiornamento su GitHub ogni ora al minuto 17 (il repo è pubblico: minuti Actions illimitati).
+// Le quote si riscaricano comunque ogni 3 ore (ritmo di API-Football), risultati ogni ora.
+// Pubblicazione: npx wrangler deploy -c cron/wrangler.jsonc
 {
   "name": "sporty-predict-cron",
   "main": "worker.js",
   "compatibility_date": "2026-11-18",
   "workers_dev": false,
-  "triggers": { "crons": ["17 8,12,16,20 * * *"] },
+  "triggers": { "crons": ["17 * * * *"] },
   "vars": { "REPO": "emadan96/sporty-predict", "WORKFLOW": "pubblica.yml" },
   "observability": { "enabled": true }
 }

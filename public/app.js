@@ -205,6 +205,186 @@ function onPin(e) {
   store.set('favs', [...state.favs]);
   renderSidebar(); renderList();
 }
+// ---------------------------------------------------------------- custom competition order
+// The user's order is a list of league codes saved in the browser. Each day shows only some competitions, so
+// the default order (favourites, then "Top in alto", then the rest) is computed first and the leagues the user
+// has placed are then rearranged among the positions they occupy: a competition never placed (say the
+// Champions League on a Tuesday) keeps its default place. Favourites always stay in their own group on top.
+state.order = store.get('leagueOrder', []);
+function orderLeagues(ls) {
+  const base = [...ls].sort((a, b) => favRank(a.code) - favRank(b.code) || (state.topFirst ? majorRank(a.code) - majorRank(b.code) : 0));
+  const rank = new Map(state.order.map((c, i) => [c, i]));
+  const out = [];
+  for (const grp of [base.filter((l) => isFav(l.code)), base.filter((l) => !isFav(l.code))]) {
+    const placed = grp.filter((l) => rank.has(l.code)).sort((a, b) => rank.get(a.code) - rank.get(b.code));
+    let i = 0;
+    for (const l of grp) out.push(rank.has(l.code) ? placed[i++] : l);
+  }
+  return out;
+}
+const orderRank = (code) => { const i = state.order.indexOf(code); return i < 0 ? Infinity : i; };
+/** Saves a new order for today's competitions, keeping the place of those not shown today. */
+function saveOrder(codes) {
+  const inDay = new Set(codes);
+  const out = [...codes];
+  let at = -1;
+  for (const c of state.order) {
+    if (inDay.has(c)) { at = out.indexOf(c); continue; }
+    out.splice(++at, 0, c);
+  }
+  state.order = out;
+  store.set('leagueOrder', out);
+}
+function resetOrder() { state.order = []; store.set('leagueOrder', []); }
+
+const GRIP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+
+/** Desktop: drag a competition by the handle in its header. While dragging, the matches are hidden so the list is short. */
+function bindListDrag(main) {
+  main.querySelectorAll('[data-grip]').forEach((g) => {
+    g.addEventListener('mousedown', () => { g.closest('.league-block').draggable = true; });
+    g.addEventListener('click', (e) => e.stopPropagation()); // the header click collapses the block
+  });
+  if (bindListDrag.done) return; // #main outlives the re-renders: its listeners are added once
+  bindListDrag.done = true;
+  let src = null, dropped = false;
+  const blocks = () => [...main.querySelectorAll('.league-block[data-code]')];
+  const clear = () => blocks().forEach((b) => b.classList.remove('drop-before', 'drop-after'));
+  main.addEventListener('mouseup', () => blocks().forEach((b) => { b.draggable = false; }));
+  main.addEventListener('dragstart', (e) => {
+    src = e.target.closest?.('.league-block[data-code]');
+    if (!src) return;
+    dropped = false;
+    const head = src.querySelector('.league-head');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', src.dataset.code);
+    e.dataTransfer.setDragImage(head, 24, head.offsetHeight / 2);
+    const y = head.getBoundingClientRect().top;
+    setTimeout(() => { // changing the page inside dragstart would cancel the drag
+      main.classList.add('reordering'); src.classList.add('dragging');
+      window.scrollBy(0, head.getBoundingClientRect().top - y); // keep the header under the pointer
+    }, 0);
+  });
+  main.addEventListener('dragover', (e) => {
+    const t = e.target.closest?.('.league-block[data-code]');
+    if (!src || !t || t.dataset.fav !== src.dataset.fav) return; // favourites and the rest are ordered separately
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    clear();
+    if (t === src) return;
+    const r = t.getBoundingClientRect();
+    t.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
+  });
+  main.addEventListener('drop', (e) => {
+    const t = main.querySelector('.drop-before, .drop-after');
+    if (!src || !t) return;
+    e.preventDefault();
+    dropped = true;
+    const codes = orderLeagues(state.data.leagues).map((l) => l.code);
+    const s = src.dataset.code;
+    codes.splice(codes.indexOf(s), 1);
+    codes.splice(codes.indexOf(t.dataset.code) + (t.classList.contains('drop-after') ? 1 : 0), 0, s);
+    saveOrder(codes);
+    const y = src.getBoundingClientRect().top;
+    main.classList.remove('reordering');
+    src = null;
+    renderList();
+    const moved = $(`#main .league-block[data-code="${CSS.escape(s)}"]`);
+    if (moved) window.scrollBy(0, moved.getBoundingClientRect().top - y);
+  });
+  main.addEventListener('dragend', () => {
+    if (dropped || !src) return;
+    const y = src.getBoundingClientRect().top;
+    clear(); main.classList.remove('reordering'); src.classList.remove('dragging'); src.draggable = false;
+    window.scrollBy(0, src.getBoundingClientRect().top - y);
+    src = null;
+  });
+}
+
+/** Mobile (and desktop too): a panel listing today's competitions, reordered by dragging the handle or with the arrows. */
+function openOrderSheet() {
+  const day = orderLeagues(state.data?.leagues || []);
+  if (!day.length) return;
+  const item = (l) => `
+    <div class="ord-item" data-code="${esc(l.code)}">
+      <span class="grip" aria-hidden="true">${GRIP}</span>${leagueIcon(l)}
+      <span class="sl-txt"><span>${esc(l.name)}</span><span class="c">${esc(l.country)}</span></span>
+      <button class="ord-btn" data-mv="-1" aria-label="Sposta su ${esc(l.name)}">↑</button>
+      <button class="ord-btn" data-mv="1" aria-label="Sposta giù ${esc(l.name)}">↓</button>
+    </div>`;
+  const favs = day.filter((l) => isFav(l.code)), rest = day.filter((l) => !isFav(l.code));
+  const back = document.createElement('div');
+  back.className = 'ord-backdrop';
+  const sh = document.createElement('section');
+  sh.className = 'ord-sheet'; sh.setAttribute('role', 'dialog'); sh.setAttribute('aria-modal', 'true'); sh.setAttribute('aria-labelledby', 'ord-title');
+  sh.innerHTML = `
+    <div class="ord-head"><h2 id="ord-title">Ordina competizioni</h2><button class="d-close" data-close aria-label="Chiudi">✕</button></div>
+    <p class="ord-hint">Tieni premuto ${GRIP} e trascina, oppure usa le frecce. L'ordine resta salvato anche per i prossimi giorni.</p>
+    <div class="ord-list">
+      ${favs.length ? `<div class="ord-cat">Preferiti · sempre in cima</div><div class="ord-grp">${favs.map(item).join('')}</div><div class="ord-cat">Altre competizioni</div>` : ''}
+      <div class="ord-grp">${rest.map(item).join('')}</div>
+    </div>
+    <div class="ord-foot"><button class="chip" data-reset>Ripristina ordine predefinito</button><button class="chip active" data-close>Fatto</button></div>`;
+  document.body.append(back, sh);
+  document.body.classList.add('sheet-open');
+  const list = sh.querySelector('.ord-list');
+  const refreshBtns = () => sh.querySelectorAll('.ord-grp').forEach((g) => {
+    const its = [...g.children];
+    its.forEach((it, i) => { it.querySelector('[data-mv="-1"]').disabled = i === 0; it.querySelector('[data-mv="1"]').disabled = i === its.length - 1; });
+  });
+  const commit = () => { saveOrder([...sh.querySelectorAll('.ord-item')].map((x) => x.dataset.code)); renderList(); refreshBtns(); };
+  refreshBtns();
+
+  const close = () => { back.remove(); sh.remove(); document.body.classList.remove('sheet-open'); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  back.addEventListener('click', close);
+  sh.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', close));
+  sh.querySelector('[data-reset]').addEventListener('click', () => { resetOrder(); renderList(); close(); openOrderSheet(); toast('Ordine predefinito ripristinato'); });
+  sh.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-mv]');
+    if (!b || b.disabled) return;
+    const it = b.closest('.ord-item');
+    if (b.dataset.mv === '-1') it.previousElementSibling?.before(it); else it.nextElementSibling?.after(it);
+    commit();
+    (b.disabled ? it.querySelector(`[data-mv="${-b.dataset.mv}"]`) : b).focus();
+    it.classList.remove('flash'); void it.offsetWidth; it.classList.add('flash');
+  });
+
+  // Drag by the handle (finger or mouse): the item follows the pointer, the others make room.
+  let drag = null;
+  list.addEventListener('pointerdown', (e) => {
+    const g = e.target.closest('.grip');
+    if (!g || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault();
+    const it = g.closest('.ord-item');
+    try { g.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    drag = { it, id: e.pointerId, grab: e.clientY - it.getBoundingClientRect().top, moved: false };
+    it.classList.add('dragging');
+    navigator.vibrate?.(8);
+  });
+  list.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const { it } = drag;
+    const lr = list.getBoundingClientRect();
+    if (e.clientY < lr.top + 40) list.scrollTop -= 10; else if (e.clientY > lr.bottom - 40) list.scrollTop += 10;
+    it.style.transform = '';
+    const mid = e.clientY - drag.grab + it.offsetHeight / 2;
+    const before = [...it.parentElement.children].find((s) => s !== it && mid < s.getBoundingClientRect().top + s.offsetHeight / 2) || null;
+    if (before ? it.nextElementSibling !== before : it.parentElement.lastElementChild !== it) { it.parentElement.insertBefore(it, before); drag.moved = true; }
+    it.style.transform = `translateY(${e.clientY - drag.grab - it.getBoundingClientRect().top}px)`;
+  });
+  const end = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag.it.style.transform = ''; drag.it.classList.remove('dragging');
+    if (drag.moved) commit();
+    drag = null;
+  };
+  list.addEventListener('pointerup', end);
+  list.addEventListener('pointercancel', end);
+  sh.tabIndex = -1; sh.focus({ preventScroll: true }); // keyboard users start inside the dialog
+}
+
 const STAR = '<svg class="star" viewBox="0 0 24 24" width="13" height="13" aria-label="Campionato principale"><path fill="currentColor" d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>';
 function passStatus(m) {
   switch (state.filter) {
@@ -237,13 +417,14 @@ function renderList() {
   if (state.time.startsWith('next') && !isToday) state.time = 'all';
   let total = 0, hits = 0, played = 0;
   const byTime = state.time !== 'all'; // time filter: one list in kick-off order
-  const ordered = [...leagues].sort((a, b) => favRank(a.code) - favRank(b.code) || (state.topFirst ? majorRank(a.code) - majorRank(b.code) : 0)); // stable: the rest keeps its order
+  const ordered = orderLeagues(leagues);
+  const canDrag = !byTime && ordered.length > 1;
   const hcols = `<div class="hcols"><span class="oh">1 · X · 2</span><span>AH</span><span>Tot</span>${cols.map(([n]) => `<span>${n}</span>`).join('')}<span>Esatto</span><span class="ih">Indice</span></div>`;
   let blocks;
   if (byTime) {
     const rows = [];
     for (const l of leagues) for (const m of l.matches) if (passFilter(m)) rows.push({ m, l });
-    rows.sort((a, b) => (a.m.time || '').localeCompare(b.m.time || '') || favRank(a.l.code) - favRank(b.l.code) || majorRank(a.l.code) - majorRank(b.l.code) || a.m.home.localeCompare(b.m.home));
+    rows.sort((a, b) => (a.m.time || '').localeCompare(b.m.time || '') || favRank(a.l.code) - favRank(b.l.code) || orderRank(a.l.code) - orderRank(b.l.code) || majorRank(a.l.code) - majorRank(b.l.code) || a.m.home.localeCompare(b.m.home));
     total = rows.length;
     for (const { m } of rows) if (m.status === 'FT' && m.pred) { played++; if (outcomeKey(m.ft) === topKey(m.pred.x12)) hits++; }
     const label = TIME_SLOTS.find(([k]) => k === state.time)?.[1] || '';
@@ -259,8 +440,8 @@ function renderList() {
     for (const m of rows) if (m.status === 'FT' && m.pred) { played++; if (outcomeKey(m.ft) === topKey(m.pred.x12)) hits++; }
     const collapsed = state.collapsed.has(l.code);
     return `
-      <section class="league-block ${collapsed ? 'collapsed' : ''}">
-        <div class="league-head ${isMajor(l.code) ? 'major' : ''} ${isFav(l.code) ? 'fav' : ''}" data-collapse="${esc(l.code)}">${leagueIcon(l)}<span class="lt"><span class="lname">${esc(l.name)}</span><span class="country">${esc(l.country)}</span></span>${isMajor(l.code) ? STAR : ''}
+      <section class="league-block ${collapsed ? 'collapsed' : ''}" data-code="${esc(l.code)}" data-fav="${isFav(l.code) ? 1 : 0}">
+        <div class="league-head ${isMajor(l.code) ? 'major' : ''} ${isFav(l.code) ? 'fav' : ''}" data-collapse="${esc(l.code)}">${canDrag ? `<span class="grip" data-grip title="Trascina per spostare">${GRIP}</span>` : ''}${leagueIcon(l)}<span class="lt"><span class="lname">${esc(l.name)}</span><span class="country">${esc(l.country)}</span></span>${isMajor(l.code) ? STAR : ''}
           <span class="lcount">${rows.length}</span>${pinBtn(l.code)}
           ${hcols}
         </div>
@@ -295,6 +476,7 @@ function renderList() {
         <select data-time aria-label="Orario">${TIME_SLOTS.filter(([k]) => !k.startsWith('next') || isToday).map(([k, v]) => `<option value="${k}" ${state.time === k ? 'selected' : ''}>${v}${k === 'all' ? '' : ` (${slotCount[k]})`}</option>`).join('')}</select>
       </label>
       <button class="chip top-chip ${state.topFirst && !byTime ? 'active' : ''}" data-top ${byTime ? 'disabled title="Con il filtro orario le partite sono in ordine di inizio"' : 'title="Coppe europee, top 5 campionati e grandi tornei per nazionali sempre in alto"'}>${STAR}Top in alto</button>
+      ${!byTime && !state.league && (state.data.leagues || []).length > 1 ? `<button class="chip ord-chip" data-order title="Scegli l'ordine delle competizioni">${GRIP}Riordina</button>` : ''}
       ${FILTERS.map(([k, v]) => `<button class="chip ${state.filter === k ? 'active' : ''}" data-filter="${k}">${k === 'live' && liveCount ? `<span class="ldot"></span>${v} <b class="num">${liveCount}</b>` : v}</button>`).join('')}
       ${played ? `<span class="chip stat" title="Esito 1X2 più probabile indovinato sulle partite finite mostrate">1X2 centrati <b>${hits}/${played}</b> (${pct(hits / played)})</span>` : ''}
     </div>
@@ -310,6 +492,8 @@ function renderList() {
     else { const a = dbar.querySelector('.day.active'); if (a) dbar.scrollLeft = a.offsetLeft - (dbar.clientWidth - a.offsetWidth) / 2 - dbar.offsetLeft; }
   }
   main.querySelectorAll('[data-pin]').forEach((b) => b.addEventListener('click', onPin));
+  main.querySelector('[data-order]')?.addEventListener('click', openOrderSheet);
+  bindListDrag(main);
   main.querySelector('[data-top]')?.addEventListener('click', () => { state.topFirst = !state.topFirst; store.set('topFirst', state.topFirst); renderList(); });
   main.querySelector('[data-time]')?.addEventListener('change', (e) => { state.time = e.target.value; renderList(); });
   main.querySelectorAll('[data-date]').forEach((el) => el.addEventListener('click', () => { location.hash = listHash(el.dataset.date, state.league); }));
@@ -382,9 +566,9 @@ function rowHtml(m, cols, league = null) {
       ${timeCell}
       <div class="teams">
         ${league ? `<div class="tl">${leagueIcon(league)}<span>${esc(league.country)} · ${esc(league.name)}</span>${isMajor(league.code) ? STAR : ''}${isFav(league.code) ? `<i class="pin-mark">${PIN}</i>` : ''}</div>` : ''}
-        <div class="t ${winH ? 'win' : ''}">${teamLogo(m.homeLogo)}<span>${esc(m.home)}</span>${rc(0)}${p?.hasValue && !fin && !lv ? '<span class="badge value">VALUE</span>' : ''}</div>
+        <div class="t ${winH ? 'win' : ''}">${teamLogo(m.homeLogo)}<span class="tn" title="${esc(m.home)}">${esc(m.home)}</span>${rc(0)}${p?.hasValue && !fin && !lv ? '<span class="badge value">VALUE</span>' : ''}</div>
         <div class="s num ${lv ? 'live' : ''}">${sc ? sc[0] ?? '' : ''}${fin && m.ht ? `<span class="htsc">(${m.ht[0]})</span>` : ''}</div>
-        <div class="t ${winA ? 'win' : ''}">${teamLogo(m.awayLogo)}<span>${esc(m.away)}</span>${rc(1)}</div>
+        <div class="t ${winA ? 'win' : ''}">${teamLogo(m.awayLogo)}<span class="tn" title="${esc(m.away)}">${esc(m.away)}</span>${rc(1)}</div>
         <div class="s num ${lv ? 'live' : ''}">${sc ? sc[1] ?? '' : ''}${fin && m.ht ? `<span class="htsc">(${m.ht[1]})</span>` : ''}</div>
       </div>
       <div class="rcols num">${oddsCells(m.move)}${pc}</div>
@@ -580,6 +764,9 @@ function sbMid(m, p) {
     <div class="sub" style="margin-top:6px">Esatto più probabile <b class="acc2">${p.expected.ft.score}</b> · PT <b class="acc2">${p.expected.ht.score}</b></div>`;
 }
 
+// Long team names in the scoreboard: smaller type, so they wrap between words instead of mid-word.
+const nameSize = (name) => { const n = String(name || ''); const w = Math.max(...n.split(/\s+/).map((x) => x.length)); return w > 13 ? 'xxl' : n.length > 22 || w > 12 ? 'xl' : n.length > 14 || w > 9 ? 'l' : ''; };
+
 function renderDetail({ tabChanged = false } = {}) {
   const { match: m, league: l, prediction: p } = state.detail;
   const panel = $('#detail');
@@ -593,9 +780,9 @@ function renderDetail({ tabChanged = false } = {}) {
         <span class="badge conf-${p.confidence}">Fiducia ${p.confidence}</span>
         <button class="d-close" aria-label="Chiudi">✕</button></div>
       <div class="scoreboard">
-        <div class="sb-team">${crest(m.home, m.homeLogo)}<div class="name">${esc(m.home)}</div></div>
+        <div class="sb-team">${crest(m.home, m.homeLogo)}<div class="name ${nameSize(m.home)}" title="${esc(m.home)}">${esc(m.home)}</div></div>
         <div class="sb-mid">${sbMid(m, p)}</div>
-        <div class="sb-team">${crest(m.away, m.awayLogo)}<div class="name">${esc(m.away)}</div></div>
+        <div class="sb-team">${crest(m.away, m.awayLogo)}<div class="name ${nameSize(m.away)}" title="${esc(m.away)}">${esc(m.away)}</div></div>
       </div>
       <div class="xgline">Goal attesi <b class="num">${fx(p.expected.xg[0])} – ${fx(p.expected.xg[1])}</b> · 1° tempo <b class="num">${fx(p.expected.xgHt[0])} – ${fx(p.expected.xgHt[1])}</b>
         ${p.ah ? ` · AH <b class="num">${sgn(p.ah.line)}</b>` : ''}${p.totalLine ? ` · Total <b class="num">${p.totalLine.line}</b>` : ''}
